@@ -1595,8 +1595,6 @@ local function LogRemote(
 		Blocked: boolean?,
 	}
 )
-	SaveRemoteCaptureEntry("Incoming", Instance, Info)
-
 	local Log = GetLog(Instance, Function)
 	if not Log then
 		return false, nil
@@ -1604,6 +1602,7 @@ local function LogRemote(
 
 	local ShouldBlock = Log:ShouldBlock(Info)
 	local CallIndex = Log:Call(Info)
+	SaveRemoteCaptureEntry("Incoming", Instance, Info)
 	return ShouldBlock, Log, CallIndex
 end
 
@@ -1851,9 +1850,11 @@ local function CreateCallbackDetour(Instance: InstancesToHook, Callback: (...any
 		}
 		if Log and Log:ShouldBlock(Info) then
 			Log:Call(Info)
+			SaveRemoteCaptureEntry("Incoming", Instance, Info)
 			return
 		end
 
+		SaveRemoteCaptureEntry("Incoming", Instance, Info)
 		local InitialEnv, InitialIdentity = getfenv(CreateCallbackDetour), getthreadidentity()
 
 		setthreadidentity(2)
@@ -2212,12 +2213,6 @@ end
 
 local function GetRemoteCapturePaths(): { string }
 	return {
-		"/sdcard/Download/Cobalt/AllRemoteCaptures.txt",
-		"/storage/emulated/0/Download/Cobalt/AllRemoteCaptures.txt",
-		"/storage/emulated/0/Documents/Cobalt/AllRemoteCaptures.txt",
-		"/sdcard/Documents/Cobalt/AllRemoteCaptures.txt",
-		"Cobalt/AllRemoteCaptures.txt",
-		"AllRemoteCaptures.txt",
 		"/sdcard/Download/Cobalt/RemoteCaptures.txt",
 		"/storage/emulated/0/Download/Cobalt/RemoteCaptures.txt",
 		"/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt",
@@ -2234,6 +2229,22 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 
 	if wax.shared.RemoteCaptureEnabled == false then
 		return
+	end
+
+	local CacheKey = nil
+	if Info and type(Info) == "table" then
+		CacheKey = string.format("%s|%s|%s|%s", tostring(Direction), tostring(Instance), tostring(Info.Origin), tostring(Info.Function))
+	end
+
+	if CacheKey then
+		local Now = os.clock()
+		local LastSeen = wax.shared.RemoteCaptureLastSeen or {}
+		local LastTime = LastSeen[CacheKey]
+		if LastTime and (Now - LastTime) < 0.35 then
+			return
+		end
+		LastSeen[CacheKey] = Now
+		wax.shared.RemoteCaptureLastSeen = LastSeen
 	end
 
 	local function SafeSerialize(Value: any): string
@@ -2393,9 +2404,11 @@ local function HandleLogging(TargetInstance: Instance, Method: string, OldFuncti
 
 		if Log:ShouldBlock(RFResultInfo) then
 			Log:Call(RFResultInfo)
+			SaveRemoteCaptureEntry("Incoming", TargetInstance, RFResultInfo)
 			return
 		end
 
+		SaveRemoteCaptureEntry("Incoming", TargetInstance, RFResultInfo)
 		return HandleLoggingResult(Log, RFResultInfo, "InvokeResult", OldFunction(...))
 	end
 
