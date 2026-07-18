@@ -102,27 +102,35 @@ end
 -- ==========================================
 local function holdProximityPrompt(prompt, duration)
     if not prompt then return false end
-    duration = duration or 1
-    
-    if fireproximityprompt then
-        -- محاولة 1: استخدام fireproximityprompt المباشر
-        fireproximityprompt(prompt)
-        task.wait(duration)
-        return true
-    elseif prompt.PromptButtonHoldBegan and prompt.PromptButtonHoldEnded then
-        -- محاولة 2: محاكاة ضغط مطول عبر الأحداث
-        prompt:InputBegan(Enum.UserInputType.Touch)
-        task.wait(duration)
-        prompt:InputEnded(Enum.UserInputType.Touch)
-        return true
-    elseif prompt.Triggered then
-        -- محاولة 3: تفعيل الحدث مباشرة
-        prompt:Fire()
-        task.wait(duration)
-        return true
+
+    duration = duration or (prompt.HoldDuration > 0 and prompt.HoldDuration or 1)
+
+    local completed = false
+    local connection
+    if prompt.Triggered then
+        connection = prompt.Triggered:Connect(function()
+            completed = true
+        end)
     end
-    
-    return false
+
+    local ok = pcall(function()
+        if fireproximityprompt then
+            fireproximityprompt(prompt)
+        end
+    end)
+
+    if ok then
+        local deadline = os.clock() + duration + 1.5
+        while not completed and os.clock() < deadline do
+            task.wait(0.1)
+        end
+    end
+
+    if connection then
+        connection:Disconnect()
+    end
+
+    return completed
 end
 
 -- ==========================================
@@ -154,7 +162,18 @@ SetObjectiveEvent.OnClientEvent:Connect(function(objectiveText, unusedVar, targe
                     walkToTarget(compPart)
                     task.wait(0.3)
                     -- استخدام ضغط مطول للكمبيوتر (مثل نظام الفحص)
-                    holdProximityPrompt(compPrompt, 1.5)
+                    local computerActivated = false
+                    for attempt = 1, 3 do
+                        if holdProximityPrompt(compPrompt, 1.5) then
+                            computerActivated = true
+                            break
+                        end
+                        task.wait(0.4)
+                    end
+
+                    if not computerActivated then
+                        warn("⚠️ لم يتم تفعيل الكمبيوتر بعد عدة محاولات.")
+                    end
                     
                     -- 3. انتظار الشاشة لتتحدث وقراءة التشخيص
                     task.wait(2.5) -- انتظار كافٍ لظهور النص على الشاشة المعلقة
@@ -170,8 +189,20 @@ SetObjectiveEvent.OnClientEvent:Connect(function(objectiveText, unusedVar, targe
                             task.wait(0.5)
                             -- استخدام ضغط مطول لأخذ الدواء (مثل الكمبيوتر تماماً)
                             print(" جاري أخذ الدواء بضغط مطول...")
-                            holdProximityPrompt(prompt, 1.5)
-                            print(" تم سحب الدواء!")
+                            local itemTaken = false
+                            for attempt = 1, 3 do
+                                if holdProximityPrompt(prompt, 1.5) then
+                                    itemTaken = true
+                                    break
+                                end
+                                task.wait(0.4)
+                            end
+
+                            if itemTaken then
+                                print(" تم سحب الدواء!")
+                            else
+                                warn("⚠️ لم يتم سحب الدواء بعد عدة محاولات.")
+                            end
                             
                             task.wait(1)
                             
