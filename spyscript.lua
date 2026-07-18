@@ -965,12 +965,23 @@ function newButton(name, description, onClick)
 end
 
 local function getExportLogPath()
-    local folder = getgenv().SimpleSpyExportFolder or "SimpleSpy_Exports"
+    local customFolder = getgenv().SimpleSpyExportFolder
+    local folder
+
+    if customFolder and customFolder ~= "" then
+        folder = customFolder
+    elseif UserInputService and UserInputService:GetPlatform() == Enum.Platform.Android then
+        folder = "/storage/emulated/0/Download/SimpleSpy_Exports"
+    else
+        folder = "C:/Users/loqfs/Downloads/folder_executor_roblox/SimpleSpy_Exports"
+    end
+
     if makefolder and not isfolder(folder) then
         pcall(makefolder, folder)
     elseif syn and syn.makefolder and (not syn.isfolder or not syn.isfolder(folder)) then
         pcall(syn.makefolder, folder)
     end
+
     return folder .. "/remote_logs.txt"
 end
 
