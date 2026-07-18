@@ -2209,12 +2209,20 @@ local function getcallingsource()
 	return debug.info(BaseLevel, "s")
 end
 
+local function GetRemoteCaptureFilePath(): string
+	return "/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt"
+end
+
 local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, Info: { [string]: any }?)
 	if not wax.shared or not wax.shared.HttpService then
 		return
 	end
 
-	local FileName = "Cobalt/RemoteCaptures.txt"
+	if wax.shared.RemoteCaptureEnabled == false then
+		return
+	end
+
+	local FileName = GetRemoteCaptureFilePath()
 	local function SafeSerialize(Value: any): string
 		local Success, Encoded = pcall(function()
 			return wax.shared.HttpService:JSONEncode(Value)
@@ -2249,6 +2257,11 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 	)
 
 	pcall(function()
+		local FolderPath = FileName:match("^(.*)[/\\][^/\\]+$")
+		if FolderPath and FolderPath ~= "" then
+			pcall(makefolder, FolderPath)
+		end
+
 		local Exists = false
 		local Success, IsFile = pcall(isfile, FileName)
 		if Success then
@@ -13143,6 +13156,44 @@ local MainFrame = Interface.New("Frame", {
 	Constants.MainUICorner,
 	Parent = ScreenGui,
 })
+
+local RemoteSaveToggle = Interface.New("TextButton", {
+	Name = "RemoteSaveToggle",
+	BackgroundColor3 = Color3.fromRGB(44, 120, 255),
+	Position = UDim2.fromOffset(16, 16),
+	Size = UDim2.fromOffset(182, 34),
+	Text = "Remote Save: ON",
+	TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamSemibold,
+	TextSize = 13,
+	ZIndex = 10,
+	Parent = MainFrame,
+
+	Constants.MainUICorner,
+	["UIStroke"] = {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = Color3.new(1, 1, 1),
+		Transparency = 0.15,
+	},
+})
+do
+	wax.shared.RemoteCaptureEnabled = true
+	RemoteSaveToggle.MouseButton1Click:Connect(function()
+		wax.shared.RemoteCaptureEnabled = not wax.shared.RemoteCaptureEnabled
+		RemoteSaveToggle.Text = wax.shared.RemoteCaptureEnabled and "Remote Save: ON" or "Remote Save: OFF"
+		RemoteSaveToggle.BackgroundColor3 = wax.shared.RemoteCaptureEnabled
+			and Color3.fromRGB(44, 120, 255)
+			or Color3.fromRGB(95, 95, 95)
+		if wax.shared.Sonner then
+			if wax.shared.RemoteCaptureEnabled then
+				wax.shared.Sonner.success("Remote capture saving enabled")
+			else
+				wax.shared.Sonner.info("Remote capture saving paused")
+			end
+		end
+	end)
+end
+
 do
 	Resize.new({
 		MainFrame = MainFrame,
