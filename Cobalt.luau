@@ -216,6 +216,61 @@ wax.shared.ShouldIgnore = function(Instance, Origin)
 		end
 	end
 
+		-- Auto-save IO logs periodically (non-intrusive)
+		do
+			task.spawn(function()
+				if typeof(writefile) ~= "function" then
+					return
+				end
+
+				-- wait for cobalt to initialize
+				local shared
+				for i = 1, 120 do
+					if getgenv and getgenv().Cobalt and getgenv().Cobalt.shared then
+						shared = getgenv().Cobalt.shared
+						break
+					end
+					task.wait(0.25)
+				end
+
+				if not shared then
+					return
+				end
+
+				while not shared.Unloaded do
+					pcall(function()
+						local folder = "Cobalt-Exports"
+						pcall(makefolder, folder)
+						local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
+
+						local out, inc
+						if shared.LuaEncode then
+							out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
+							inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
+						else
+							out = tostring(shared.Logs and shared.Logs.Outgoing or "")
+							inc = tostring(shared.Logs and shared.Logs.Incoming or "")
+						end
+
+						local content = table.concat({
+							"=== OUTGOING ===",
+							out,
+							"=== INCOMING ===",
+							inc,
+						}, "\n\n")
+
+						writefile(filename, content)
+
+						if shared.Sonner and shared.Sonner.success then
+							pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Auto-saved IO logs to " .. filename)
+						end
+					end)
+
+					task.wait(30)
+				end
+			end)
+		end
+
 	return wax.shared.Settings.IgnoredRemotesDropdown.Value[Instance.ClassName] == true
 		or (wax.shared.Settings.IgnorePlayerModule.Value and wax.shared.IsPlayerModule(Origin, Instance))
 end
@@ -20366,42 +20421,7 @@ return function(props: {
 			})
 		end, 14)
 
-		LoggingSection:CreateButton("Save IO Logs", function()
-			wax.shared.Sonner.promise(function()
-				assert(typeof(writefile) == "function", "Exploit does not support writefile")
 
-				local folder = "Cobalt-Exports"
-				pcall(makefolder, folder)
-				local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
-
-				local out, inc
-				if wax.shared.LuaEncode then
-					out = wax.shared.LuaEncode(wax.shared.Logs and wax.shared.Logs.Outgoing or {}, { Prettify = true })
-					inc = wax.shared.LuaEncode(wax.shared.Logs and wax.shared.Logs.Incoming or {}, { Prettify = true })
-				else
-					out = tostring(wax.shared.Logs and wax.shared.Logs.Outgoing or "")
-					inc = tostring(wax.shared.Logs and wax.shared.Logs.Incoming or "")
-				end
-
-				local content = table.concat({
-					"=== OUTGOING ===",
-					out,
-					"=== INCOMING ===",
-					inc,
-				}, "\n\n")
-
-				writefile(filename, content)
-				return filename
-			end, {
-				loadingText = "Saving IO logs...",
-				successText = function(fileName)
-					return `Saved IO logs to {fileName}`
-				end,
-				errorText = function(err)
-					return `Save failed: {err}`
-				end,
-			})
-		end, 14)
 	end
 
 	--// Compatibility & Safety Section \\--
