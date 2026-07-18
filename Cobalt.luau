@@ -2229,6 +2229,22 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 		return
 	end
 
+	local CacheKey = nil
+	if Info and type(Info) == "table" then
+		CacheKey = string.format("%s|%s|%s|%s", tostring(Direction), tostring(Instance), tostring(Info.Origin), tostring(Info.Function))
+	end
+
+	if CacheKey then
+		local Now = os.clock()
+		local LastSeen = wax.shared.RemoteCaptureLastSeen or {}
+		local LastTime = LastSeen[CacheKey]
+		if LastTime and (Now - LastTime) < 0.35 then
+			return
+		end
+		LastSeen[CacheKey] = Now
+		wax.shared.RemoteCaptureLastSeen = LastSeen
+	end
+
 	local function SafeSerialize(Value: any): string
 		local Success, Encoded = pcall(function()
 			return wax.shared.HttpService:JSONEncode(Value)
