@@ -2209,8 +2209,15 @@ local function getcallingsource()
 	return debug.info(BaseLevel, "s")
 end
 
-local function GetRemoteCaptureFilePath(): string
-	return "/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt"
+local function GetRemoteCapturePaths(): { string }
+	return {
+		"/sdcard/Download/Cobalt/RemoteCaptures.txt",
+		"/storage/emulated/0/Download/Cobalt/RemoteCaptures.txt",
+		"/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt",
+		"/sdcard/Documents/Cobalt/RemoteCaptures.txt",
+		"Cobalt/RemoteCaptures.txt",
+		"RemoteCaptures.txt",
+	}
 end
 
 local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, Info: { [string]: any }?)
@@ -2222,7 +2229,6 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 		return
 	end
 
-	local FileName = GetRemoteCaptureFilePath()
 	local function SafeSerialize(Value: any): string
 		local Success, Encoded = pcall(function()
 			return wax.shared.HttpService:JSONEncode(Value)
@@ -2256,24 +2262,47 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 		SafeSerialize(Info and Info.Arguments or {})
 	)
 
-	pcall(function()
-		local FolderPath = FileName:match("^(.*)[/\\][^/\\]+$")
-		if FolderPath and FolderPath ~= "" then
-			pcall(makefolder, FolderPath)
-		end
+	local SavedPath = nil
+	local SaveError = nil
 
-		local Exists = false
-		local Success, IsFile = pcall(isfile, FileName)
+	for _, CandidatePath in GetRemoteCapturePaths() do
+		local Success, Error = pcall(function()
+			local FolderPath = CandidatePath:match("^(.*)[/\\][^/\\]+$")
+			if FolderPath and FolderPath ~= "" then
+				pcall(makefolder, FolderPath)
+			end
+
+			local Exists = false
+			local FileStatus = pcall(isfile, CandidatePath)
+			if FileStatus then
+				Exists = isfile(CandidatePath)
+			end
+
+			if Exists then
+				appendfile(CandidatePath, Entry)
+			else
+				writefile(CandidatePath, Entry)
+			end
+		end)
+
 		if Success then
-			Exists = IsFile
-		end
-
-		if Exists then
-			appendfile(FileName, Entry)
+			SavedPath = CandidatePath
+			break
 		else
-			writefile(FileName, Entry)
+			SaveError = Error
 		end
-	end)
+	end
+
+	if SavedPath then
+		wax.shared.LastRemoteCapturePath = SavedPath
+		if not wax.shared.RemoteCaptureDebugShown then
+			print(`[Cobalt] Remote capture saved to: {SavedPath}`)
+			wax.shared.RemoteCaptureDebugShown = true
+		end
+	elseif not wax.shared.RemoteCaptureDebugShown then
+		warn(`[Cobalt] Remote capture save failed. Checked common Android paths. Executor may not support writefile.`)
+		wax.shared.RemoteCaptureDebugShown = true
+	end
 end
 
 --[[
@@ -2303,7 +2332,6 @@ local function HandleLoggingResult(Log, Info, ResultKey, ...)
 	local Result = wax.shared.SafePack.Pack(...)
 	Info[ResultKey] = Result
 	Log:Call(Info)
-	SaveRemoteCaptureEntry("Outgoing", Info.Origin, Info)
 
 	return ...
 end
