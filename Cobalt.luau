@@ -1596,13 +1596,14 @@ local function LogRemote(
 	}
 )
 	local Log = GetLog(Instance, Function)
+	SaveRemoteCaptureEntry("Incoming", Instance, Info)
+
 	if not Log then
 		return false, nil
 	end
 
 	local ShouldBlock = Log:ShouldBlock(Info)
 	local CallIndex = Log:Call(Info)
-	SaveRemoteCaptureEntry("Incoming", Instance, Info)
 	return ShouldBlock, Log, CallIndex
 end
 
@@ -2231,7 +2232,15 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 
 	local CacheKey = nil
 	if Info and type(Info) == "table" then
-		CacheKey = string.format("%s|%s|%s|%s", tostring(Direction), tostring(Instance), tostring(Info.Origin), tostring(Info.Function))
+		CacheKey = string.format(
+			"%s|%s|%s|%s|%s|%s",
+			tostring(Direction),
+			tostring(Instance),
+			tostring(Info.Origin),
+			tostring(Info.Function),
+			tostring(Info.Line),
+			tostring(Info.Arguments)
+		)
 	end
 
 	if CacheKey then
@@ -2373,7 +2382,9 @@ local function HandleLogging(TargetInstance: Instance, Method: string, OldFuncti
 	}
 	local ShouldBlock = Log:ShouldBlock(Info)
 	Log:Call(Info)
-	SaveRemoteCaptureEntry("Outgoing", TargetInstance, Info)
+	if not wax.shared.RemoteCaptureSuppressed then
+		SaveRemoteCaptureEntry("Outgoing", TargetInstance, Info)
+	end
 	if ShouldBlock then
 		return
 	end
