@@ -1602,7 +1602,6 @@ local function LogRemote(
 
 	local ShouldBlock = Log:ShouldBlock(Info)
 	local CallIndex = Log:Call(Info)
-	SaveRemoteCaptureEntry("Incoming", Instance, Info)
 	return ShouldBlock, Log, CallIndex
 end
 
@@ -1850,11 +1849,9 @@ local function CreateCallbackDetour(Instance: InstancesToHook, Callback: (...any
 		}
 		if Log and Log:ShouldBlock(Info) then
 			Log:Call(Info)
-			SaveRemoteCaptureEntry("Incoming", Instance, Info)
 			return
 		end
 
-		SaveRemoteCaptureEntry("Incoming", Instance, Info)
 		local InitialEnv, InitialIdentity = getfenv(CreateCallbackDetour), getthreadidentity()
 
 		setthreadidentity(2)
@@ -2211,60 +2208,6 @@ local function getcallingsource()
 	return debug.info(BaseLevel, "s")
 end
 
-local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, Info: { [string]: any }?)
-	if not wax.shared or not wax.shared.HttpService then
-		return
-	end
-
-	local FileName = "Cobalt/RemoteCaptures.txt"
-	local function SafeSerialize(Value: any): string
-		local Success, Encoded = pcall(function()
-			return wax.shared.HttpService:JSONEncode(Value)
-		end)
-
-		if Success and typeof(Encoded) == "string" then
-			return Encoded
-		end
-
-		local Success2, Converted = pcall(function()
-			return tostring(Value)
-		end)
-
-		if Success2 then
-			return Converted
-		end
-
-		return "<unserializable>"
-	end
-
-	local Timestamp = if DateTime and DateTime.now then DateTime.now():ToIsoDate() else tostring(tick())
-	local InstanceName = if Instance and typeof(Instance) == "Instance" and Instance.GetFullName then Instance:GetFullName() else tostring(Instance)
-	local Entry = string.format(
-		"[%s] [%s] Instance=%s\nOrigin=%s\nFunction=%s\nLine=%s\nArguments=%s\n---\n",
-		Timestamp,
-		Direction,
-		InstanceName,
-		tostring(Info and Info.Origin or nil),
-		tostring(Info and Info.Function or nil),
-		tostring(Info and Info.Line or nil),
-		SafeSerialize(Info and Info.Arguments or {})
-	)
-
-	pcall(function()
-		local Exists = false
-		local Success, IsFile = pcall(isfile, FileName)
-		if Success then
-			Exists = IsFile
-		end
-
-		if Exists then
-			appendfile(FileName, Entry)
-		else
-			writefile(FileName, Entry)
-		end
-	end)
-end
-
 --[[
 	Gets the log for a specific instance and direction.
 
@@ -2292,7 +2235,6 @@ local function HandleLoggingResult(Log, Info, ResultKey, ...)
 	local Result = wax.shared.SafePack.Pack(...)
 	Info[ResultKey] = Result
 	Log:Call(Info)
-	SaveRemoteCaptureEntry("Outgoing", Info.Origin, Info)
 
 	return ...
 end
@@ -2318,7 +2260,6 @@ local function HandleLogging(TargetInstance: Instance, Method: string, OldFuncti
 	}
 	local ShouldBlock = Log:ShouldBlock(Info)
 	Log:Call(Info)
-	SaveRemoteCaptureEntry("Outgoing", TargetInstance, Info)
 	if ShouldBlock then
 		return
 	end
@@ -2347,11 +2288,9 @@ local function HandleLogging(TargetInstance: Instance, Method: string, OldFuncti
 
 		if Log:ShouldBlock(RFResultInfo) then
 			Log:Call(RFResultInfo)
-			SaveRemoteCaptureEntry("Incoming", TargetInstance, RFResultInfo)
 			return
 		end
 
-		SaveRemoteCaptureEntry("Incoming", TargetInstance, RFResultInfo)
 		return HandleLoggingResult(Log, RFResultInfo, "InvokeResult", OldFunction(...))
 	end
 
@@ -25265,4 +25204,73 @@ end
 
 for _, ScriptRef in next, ScriptsToRun do
     Defer(LoadScript, ScriptRef)
+end
+
+-- Save IO Button (non-intrusive addition)
+do
+	local ok, Cobalt = pcall(function() return getgenv().Cobalt end)
+	if not ok or not Cobalt or not Cobalt.shared then
+		return
+	end
+
+	local shared = Cobalt.shared
+	pcall(function()
+		local parent = (shared.gethui and shared.gethui()) or shared.CoreGui
+		if not parent then
+			return
+		end
+
+		local screenGui = Instance.new("ScreenGui")
+		screenGui.Name = "Cobalt_SaveIO_Gui"
+		screenGui.ResetOnSpawn = false
+		screenGui.Parent = parent
+
+		local btn = Instance.new("TextButton")
+		btn.Name = "Cobalt_SaveIO_Button"
+		btn.Size = UDim2.new(0, 120, 0, 30)
+		btn.Position = UDim2.new(0, 10, 0, 10)
+		btn.AnchorPoint = Vector2.new(0, 0)
+		btn.Text = "Save IO Logs"
+		btn.TextSize = 14
+		btn.BackgroundTransparency = 0.2
+		btn.ZIndex = 999999
+		btn.Parent = screenGui
+
+		btn.MouseButton1Click:Connect(function()
+			local success, err = pcall(function()
+				local folder = "Cobalt-Exports"
+				pcall(makefolder, folder)
+				local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
+
+				local out = nil
+				local inc = nil
+				if shared.LuaEncode then
+					out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
+					inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
+				else
+					out = tostring(shared.Logs and shared.Logs.Outgoing or "")
+					inc = tostring(shared.Logs and shared.Logs.Incoming or "")
+				end
+
+				local content = table.concat({
+					"=== OUTGOING ===",
+					out,
+					"=== INCOMING ===",
+					inc,
+				}, "\n\n")
+
+				writefile(filename, content)
+
+				if shared.Sonner and shared.Sonner.success then
+					pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Saved IO logs to " .. filename)
+				else
+					print("Cobalt: Saved IO logs to " .. filename)
+				end
+			end)
+
+			if not success then
+				warn("Cobalt: Failed to save IO logs - " .. tostring(err))
+			end
+		end)
+	end)
 end
