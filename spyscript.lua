@@ -964,6 +964,116 @@ function newButton(name, description, onClick)
     updateFunctionCanvas()
 end
 
+local function getExportLogPath()
+    local folder = getgenv().SimpleSpyExportFolder or "SimpleSpy_Exports"
+    if makefolder and not isfolder(folder) then
+        pcall(makefolder, folder)
+    elseif syn and syn.makefolder and (not syn.isfolder or not syn.isfolder(folder)) then
+        pcall(syn.makefolder, folder)
+    end
+    return folder .. "/remote_logs.txt"
+end
+
+local function formatRemoteLogEntry(log, remoteType)
+    local remoteName = log and log.Name or "Unknown"
+    local debugId = log and log.DebugId or "N/A"
+    local sourceText = "N/A"
+    local argsText = "N/A"
+    local scriptText = "-- Not generated yet"
+
+    if log and log.Source then
+        if typeof(log.Source) == "Instance" then
+            sourceText = log.Source:GetFullName()
+        else
+            sourceText = tostring(log.Source)
+        end
+    end
+
+    if log and log.args then
+        local ok, serialized = pcall(function()
+            return v2s(log.args)
+        end)
+        if ok then
+            argsText = serialized
+        else
+            argsText = tostring(log.args)
+        end
+    end
+
+    if log and log.GenScript then
+        scriptText = log.GenScript
+    end
+
+    return string.format(
+        "=== Remote Log ===\nTime: %s\nRemote Name: %s\nType: %s\nDebugId: %s\nSource: %s\nArgs:\n%s\n\nGenerated Script:\n%s\n\n---\n",
+        os.date("%Y-%m-%d %H:%M:%S"),
+        tostring(remoteName),
+        tostring(remoteType or "unknown"),
+        tostring(debugId),
+        tostring(sourceText),
+        tostring(argsText),
+        tostring(scriptText)
+    )
+end
+
+local function writeRemoteLogToFile(log, remoteType)
+    local path = getExportLogPath()
+    local entry = formatRemoteLogEntry(log, remoteType)
+
+    if appendfile then
+        pcall(appendfile, path, entry)
+    elseif writefile then
+        local existing = ""
+        local okRead = pcall(function()
+            existing = readfile(path)
+        end)
+        if okRead then
+            pcall(writefile, path, existing .. entry)
+        else
+            pcall(writefile, path, entry)
+        end
+    elseif syn and syn.writefile then
+        local existing = ""
+        local okRead = pcall(function()
+            existing = syn.readfile(path)
+        end)
+        if okRead then
+            pcall(syn.writefile, path, existing .. entry)
+        else
+            pcall(syn.writefile, path, entry)
+        end
+    end
+
+    return path
+end
+
+function exportCurrentLogsToFile()
+    local path = getExportLogPath()
+    local content = ""
+
+    for _, log in next, logs do
+        if log then
+            local remoteType = "Unknown"
+            if log.Remote and log.Remote:IsA("RemoteFunction") then
+                remoteType = "RemoteFunction"
+            elseif log.Remote and (log.Remote:IsA("RemoteEvent") or log.Remote:IsA("UnreliableRemoteEvent")) then
+                remoteType = "RemoteEvent"
+            end
+            content ..= formatRemoteLogEntry(log, remoteType)
+        end
+    end
+
+    if writefile then
+        pcall(writefile, path, content)
+    elseif appendfile then
+        pcall(appendfile, path, content)
+    elseif syn and syn.writefile then
+        pcall(syn.writefile, path, content)
+    end
+
+    return path
+end
+
 --- Adds new Remote to logs
 --- @param name string The name of the remote being logged
 --- @param type string The type of the remote being logged (either 'function' or 'event')
@@ -981,22 +1091,39 @@ function newRemote(type, data)
     local Text = Create("TextLabel",{TextTruncate = Enum.TextTruncate.AtEnd,Name = "Text",Parent = RemoteTemplate,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 12, 0, 1),Size = UDim2.new(0, 105, 0, 18),ZIndex = 2,Font = Enum.Font.SourceSans,Text = remote.Name,TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextXAlignment = Enum.TextXAlignment.Left})
     local Button = Create("TextButton",{Name = "Button",Parent = RemoteTemplate,BackgroundColor3 = Color3.new(0, 0, 0),BackgroundTransparency = 0.75,BorderColor3 = Color3.new(1, 1, 1),Position = UDim2.new(0, 0, 0, 1),Size = UDim2.new(0, 117, 0, 18),AutoButtonColor = false,Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
 
+    local argsToUse = data.args or {}
+    local generatedScript = "-- Generating, please wait...\n-- (If this message persists, the remote args are likely extremely long)"
+
+    local ok, scriptResult = pcall(function()
+        return genScript(remote, argsToUse)
+    end)
+    if ok then
+        generatedScript = scriptResult
+    else
+        generatedScript = "-- Failed to generate script\n-- " .. tostring(scriptResult)
+    end
+
+    if data.blocked then
+        generatedScript = "-- THIS REMOTE WAS PREVENTED FROM FIRING TO THE SERVER BY SIMPLESPY\n\n" .. generatedScript
+    end
+
     local log = {
         Name = remote.name,
         Function = data.infofunc or "--Function Info is disabled",
         Remote = remote,
         DebugId = data.id,
         metamethod = data.metamethod,
-        args = data.args,
+        args = argsToUse,
         Log = RemoteTemplate,
         Button = Button,
         Blocked = data.blocked,
         Source = callingscript,
         returnvalue = data.returnvalue,
-        GenScript = "-- Generating, please wait...\n-- (If this message persists, the remote args are likely extremely long)"
+        GenScript = generatedScript
     }
 
     logs[#logs + 1] = log
+    writeRemoteLogToFile(log, type)
     local connect = Button.MouseButton1Click:Connect(function()
         logthread(running())
         eventSelect(RemoteTemplate)
@@ -2071,6 +2198,15 @@ newButton(
             setclipboard(v2s(selected.Source))
             TextLabel.Text = "Done!"
         end
+    end
+)
+
+newButton(
+    "Save Logs to TXT",
+    function() return "Save all current remote logs to a text file" end,
+    function()
+        local path = exportCurrentLogsToFile()
+        TextLabel.Text = "Saved to " .. tostring(path)
     end
 )
 
