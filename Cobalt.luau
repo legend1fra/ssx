@@ -20365,6 +20365,43 @@ return function(props: {
 				end,
 			})
 		end, 14)
+
+		LoggingSection:CreateButton("Save IO Logs", function()
+			wax.shared.Sonner.promise(function()
+				assert(typeof(writefile) == "function", "Exploit does not support writefile")
+
+				local folder = "Cobalt-Exports"
+				pcall(makefolder, folder)
+				local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
+
+				local out, inc
+				if wax.shared.LuaEncode then
+					out = wax.shared.LuaEncode(wax.shared.Logs and wax.shared.Logs.Outgoing or {}, { Prettify = true })
+					inc = wax.shared.LuaEncode(wax.shared.Logs and wax.shared.Logs.Incoming or {}, { Prettify = true })
+				else
+					out = tostring(wax.shared.Logs and wax.shared.Logs.Outgoing or "")
+					inc = tostring(wax.shared.Logs and wax.shared.Logs.Incoming or "")
+				end
+
+				local content = table.concat({
+					"=== OUTGOING ===",
+					out,
+					"=== INCOMING ===",
+					inc,
+				}, "\n\n")
+
+				writefile(filename, content)
+				return filename
+			end, {
+				loadingText = "Saving IO logs...",
+				successText = function(fileName)
+					return `Saved IO logs to {fileName}`
+				end,
+				errorText = function(err)
+					return `Save failed: {err}`
+				end,
+			})
+		end, 14)
 	end
 
 	--// Compatibility & Safety Section \\--
