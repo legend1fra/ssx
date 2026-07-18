@@ -1,694 +1,99 @@
 local Players = game:GetService("Players")
-local PathfindingService = game:GetService("PathfindingService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
-
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Library = require(ReplicatedStorage:WaitForChild("Lib"))
 local LocalPlayer = Players.LocalPlayer
-local Lib = nil
-local Network = nil
-local SetObjectiveEvent = nil
 
-local statusLabel = nil
-local detailLabel = nil
-local statsLabel = nil
-local guiReady = false
+-- متغير للتحكم بحالة التفعيل (مغلق افتراضياً)
+local sanityEnabled = false
 
-local function createStatusGui()
-    local ok, result = pcall(function()
-        local player = Players.LocalPlayer
-        if not player then
-            return nil
-        end
-
-        local playerGui = player:WaitForChild("PlayerGui", 5)
-        if not playerGui then
-            return nil
-        end
-
-        local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "AutomationStatusGui"
-        screenGui.ResetOnSpawn = false
-        screenGui.Parent = playerGui
-
-        local frame = Instance.new("Frame")
-        frame.Name = "MainFrame"
-        frame.Size = UDim2.new(0, 280, 0, 140)
-        frame.Position = UDim2.new(0.02, 0, 0.02, 0)
-        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        frame.BorderSizePixel = 0
-        frame.Parent = screenGui
-
-        local title = Instance.new("TextLabel")
-        title.Name = "Title"
-        title.Size = UDim2.new(1, -12, 0, 24)
-        title.Position = UDim2.new(0, 6, 0, 8)
-        title.Text = "Automation Status"
-        title.TextColor3 = Color3.fromRGB(255, 255, 255)
-        title.BackgroundTransparency = 1
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = 15
-        title.Parent = frame
-
-        statusLabel = Instance.new("TextLabel")
-        statusLabel.Name = "Status"
-        statusLabel.Size = UDim2.new(1, -12, 0, 24)
-        statusLabel.Position = UDim2.new(0, 6, 0, 36)
-        statusLabel.Text = "⏳ Waiting..."
-        statusLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
-        statusLabel.BackgroundTransparency = 1
-        statusLabel.Font = Enum.Font.GothamSemibold
-        statusLabel.TextSize = 14
-        statusLabel.Parent = frame
-
-        detailLabel = Instance.new("TextLabel")
-        detailLabel.Name = "Detail"
-        detailLabel.Size = UDim2.new(1, -12, 0, 44)
-        detailLabel.Position = UDim2.new(0, 6, 0, 64)
-        detailLabel.Text = "Script is starting..."
-        detailLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-        detailLabel.BackgroundTransparency = 1
-        detailLabel.Font = Enum.Font.Gotham
-        detailLabel.TextSize = 12
-        detailLabel.Parent = frame
-
-        statsLabel = Instance.new("TextLabel")
-        statsLabel.Name = "Stats"
-        statsLabel.Size = UDim2.new(1, -12, 0, 24)
-        statsLabel.Position = UDim2.new(0, 6, 0, 110)
-        statsLabel.Text = "Success: 0 | Failed: 0"
-        statsLabel.TextColor3 = Color3.fromRGB(120, 220, 120)
-        statsLabel.BackgroundTransparency = 1
-        statsLabel.Font = Enum.Font.Gotham
-        statsLabel.TextSize = 12
-        statsLabel.Parent = frame
-
-        return screenGui
-    end)
-
-    if not ok then
-        warn("⚠️ Failed to create status UI: " .. tostring(result))
-        return nil
-    end
-
-    return result
+-- الدالة المعدلة: تعمل فقط إذا كان الزر مفعل (true)
+local function keepSanityFull()
+ if sanityEnabled then
+  LocalPlayer:SetAttribute("Sanity", 100)
+ end
 end
 
-local function updateStatus(text, detailText, statsText)
-    if not guiReady then
-        return
-    end
+-- ربط السكربت بنظام اللعبة
+Library.Inject("PlayerLostSanity", keepSanityFull)
+LocalPlayer:GetAttributeChangedSignal("Sanity"):Connect(keepSanityFull)
+RunService.Heartbeat:Connect(keepSanityFull)
 
-    if statusLabel then
-        statusLabel.Text = text or statusLabel.Text
-    end
-    if detailLabel then
-        detailLabel.Text = detailText or detailLabel.Text
-    end
-    if statsLabel and statsText then
-        statsLabel.Text = statsText
-    end
+-- ==========================================
+-- إنشاء واجهة الزر (UI Creation)
+-- ==========================================
+
+local ScreenGui = Instance.new("ScreenGui")
+local ToggleButton = Instance.new("TextButton")
+local UICorner = Instance.new("UICorner")
+
+-- تحديد مكان وضع الزر (في الـ CoreGui لضمان ثباته)
+local ParentUI = game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = ParentUI
+ScreenGui.ResetOnSpawn = false
+
+-- تصميم الزر
+ToggleButton.Name = "SanityToggleBtn"
+ToggleButton.Parent = ScreenGui
+ToggleButton.Size = UDim2.new(0, 130, 0, 45)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.4, 0) -- يظهر في يسار الشاشة بالمنتصف
+ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50) -- أحمر (إيقاف)
+ToggleButton.Text = "Sanity: OFF"
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.SourceSansBold
+ToggleButton.TextSize = 18
+ToggleButton.BorderSizePixel = 0
+
+-- جعل حواف الزر دائرية وجميلة
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = ToggleButton
+
+-- برمجة ميزة سحب وتحريك الزر على الشاشة
+local UserInputService = game:GetService("UserInputService")
+local dragging, dragInput, dragStart, startPos
+
+local function update(input)
+ local delta = input.Position - dragStart
+ ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 end
 
-local function ensureStatusGui()
-    if guiReady then
-        return
-    end
-
-    local player = Players.LocalPlayer
-    if not player then
-        print("🧪 Script started; waiting for LocalPlayer...")
-        task.wait(1)
-        player = Players.LocalPlayer
-    end
-
-    local gui = createStatusGui()
-    if gui then
-        guiReady = true
-        updateStatus("🧪 Script started", "Waiting for game data...", "Ready")
-    else
-        print("🧪 Script started; UI will appear once LocalPlayer is ready")
-    end
-end
-
-task.spawn(function()
-    pcall(function()
-        ensureStatusGui()
-    end)
+ToggleButton.InputBegan:Connect(function(input)
+ if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+  dragging = true
+  dragStart = input.Position
+  startPos = ToggleButton.Position
+  
+  input.Changed:Connect(function()
+   if input.UserInputState == Enum.UserInputState.End then
+    dragging = false
+   end
+  end)
+ end
 end)
 
-local function waitForChild(parent, childName, timeout)
-    timeout = timeout or 10
-    local startTime = os.clock()
-    while os.clock() - startTime < timeout do
-        local child = parent:FindFirstChild(childName)
-        if child then
-            return child
-        end
-        task.wait(0.1)
-    end
-    return nil
-end
-
-local function waitForCharacter(timeout)
-    timeout = timeout or 10
-    local startTime = os.clock()
-    while os.clock() - startTime < timeout do
-        local character = LocalPlayer.Character
-        if character and character:FindFirstChild("Humanoid") and character:FindFirstChild("HumanoidRootPart") then
-            return character
-        end
-        task.wait(0.2)
-    end
-    return nil
-end
-
-local function initializeDependencies()
-    local libModule = waitForChild(ReplicatedStorage, "Lib", 8)
-    if not libModule then
-        warn("⚠️ لم أجد Lib في ReplicatedStorage")
-        return false
-    end
-
-    local success, module = pcall(require, libModule)
-    if not success then
-        warn("⚠️ فشل تحميل Lib: " .. tostring(module))
-        return false
-    end
-
-    Lib = module
-    Network = Lib and Lib.Network or nil
-
-    local utilFolder = waitForChild(ReplicatedStorage, "Util", 8)
-    local netFolder = utilFolder and waitForChild(utilFolder, "Net", 8)
-    local reFolder = netFolder and waitForChild(netFolder, "RE", 8)
-    SetObjectiveEvent = reFolder and waitForChild(reFolder, "SetObjective", 8)
-
-    if not SetObjectiveEvent then
-        warn("⚠️ لم أجد الحدث SetObjective في المسار ReplicatedStorage/Util/Net/RE/SetObjective")
-        return false
-    end
-
-    updateStatus("✅ Script ready", "Waiting for task...", "Success: 0 | Failed: 0")
-    print("✅ Script ready and listening for tasks")
-    return true
-end
-
--- ==========================================
--- متغيرات لتحسين الأداء والإحصائيات
--- ==========================================
-local cachedPrompts = {}
-local lastCacheTime = 0
-local CACHE_DURATION = 2 -- تحديث الكاش كل ثانيتين
-
-local stats = {
-    successCount = 0,
-    failureCount = 0,
-    totalAttempts = 0,
-    startTime = tick()
-}
-
--- ==========================================
--- دالة طباعة الإحصائيات
--- ==========================================
-local function printStats()
-    local elapsedTime = tick() - stats.startTime
-    local successRate = stats.totalAttempts > 0 and (stats.successCount / stats.totalAttempts * 100) or 0
-    
-    print("\n" .. string.rep("=", 50))
-    print("📊 إحصائيات الأداء:")
-    print("  ✅ عدد النجاحات: " .. stats.successCount)
-    print("  ❌ عدد الفشل: " .. stats.failureCount)
-    print("  📈 إجمالي المحاولات: " .. stats.totalAttempts)
-    print("  📊 نسبة النجاح: " .. string.format("%.1f%%", successRate))
-    print("  ⏱️  الوقت المنقضي: " .. string.format("%.1f", elapsedTime) .. " ثانية")
-    print(string.rep("=", 50) .. "\n")
-end
-
--- ==========================================
--- قائمة الأدوية المتاحة في اللعبة
--- ==========================================
-local medicalItems = {
-    "IV Drops", "Eye Drops", "Medicine", "Herbs", 
-    "Antibiotics", "Bandages", "Ointment", "Cough Syrup"
-}
-
--- ==========================================
--- دوال البحث المحسّنة مع التخزين المؤقت
--- ==========================================
-local function updatePromptCache()
-    local currentTime = tick()
-    if currentTime - lastCacheTime < CACHE_DURATION then
-        return -- لا تحدث الكاش إذا لم تمض المدة الكافية
-    end
-    
-    cachedPrompts = {}
-    for _, descendant in ipairs(workspace:GetDescendants()) do
-        if descendant:IsA("ProximityPrompt") then
-            cachedPrompts[descendant] = {
-                ObjectText = descendant.ObjectText:lower(),
-                ActionText = descendant.ActionText:lower(),
-                Parent = descendant.Parent,
-                Instance = descendant
-            }
-        end
-    end
-    lastCacheTime = currentTime
-end
-
--- ==========================================
--- دوال البحث الأساسية
--- ==========================================
-local function findPatientTarget()
-    -- البحث في الـ Tags أولاً (أسرع)
-    local patients = CollectionService:GetTagged("Patient") or {}
-    if #patients > 0 then return patients[1] end
-    
-    -- البحث التقليدي كحل بديل
-    local folders = {workspace:FindFirstChild("Patients"), workspace:FindFirstChild("NPCs"), workspace:FindFirstChild("Misc"), workspace}
-    for _, folder in ipairs(folders) do
-        if folder then
-            for _, child in ipairs(folder:GetChildren()) do
-                if child:IsA("Model") and (child:FindFirstChild("Humanoid") or string.find(child.Name:lower(), "patient")) then
-                    return child
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function findItemAndPrompt(itemName)
-    updatePromptCache()
-    
-    for _, data in pairs(cachedPrompts) do
-        if string.find(data.ObjectText, itemName:lower()) or string.find(data.ActionText, itemName:lower()) then
-            return data.Parent, data.Instance
-        end
-    end
-    return nil, nil
-end
-
-local function interactWithComputer()
-    updatePromptCache()
-    
-    -- البحث الأول: ابحث عن "inspect" بالضبط
-    for _, data in pairs(cachedPrompts) do
-        local objText = data.ObjectText
-        local actText = data.ActionText
-        local parentName = data.Parent.Name:lower()
-        
-        if (string.find(objText, "inspect") and #objText < 50) or 
-           (string.find(actText, "inspect") and #actText < 50) or
-           (string.find(parentName, "computer") or string.find(parentName, "console")) then
-            print("✅ وجدت الكمبيوتر: " .. data.Parent.Name)
-            return data.Parent, data.Instance
-        end
-    end
-    
-    -- البحث الثاني: ابحث عن أي شيء يتعلق بـ "examine" أو "look"
-    for _, data in pairs(cachedPrompts) do
-        if string.find(data.ObjectText, "examine") or string.find(data.ActionText, "examine") or
-           string.find(data.ObjectText, "look") or string.find(data.ActionText, "look") then
-            print("✅ وجدت جهاز فحص: " .. data.Parent.Name)
-            return data.Parent, data.Instance
-        end
-    end
-    
-    return nil, nil
-end
-
-
--- ==========================================
--- دالة قراءة التشخيص من الشاشة (محسّنة جداً)
--- ==========================================
-local function getDiagnosisFromMonitor()
-    print("🔍 جاري قراءة نتيجة الفحص...")
-    
-    -- البحث 1: ابحث في TextLabels الكبيرة (عادة ما تكون فيها النتائج)
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") then
-            if obj.Text and obj.Text ~= "" and obj.TextSize and obj.TextSize >= 14 then
-                local screenText = obj.Text:lower()
-                local screenLength = string.len(screenText)
-                
-                -- ابحث عن الأدوية
-                for _, medicine in ipairs(medicalItems) do
-                    local medicineLower = medicine:lower()
-                    if string.find(screenText, medicineLower) then
-                        -- تأكد أن النص ليس طويل جداً (كي لا يكون معلومات غير ذات صلة)
-                        if screenLength < 200 then
-                            print("✅ تم العثور على التشخيص: " .. medicine)
-                            return medicine
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    -- البحث 2: ابحث في أي TextLabel بدون قيود الحجم
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("TextLabel") or obj:IsA("TextButton") then
-            if obj.Text and obj.Text ~= "" and string.len(obj.Text) < 300 then
-                local screenText = obj.Text:lower()
-                
-                for _, medicine in ipairs(medicalItems) do
-                    if string.find(screenText, medicine:lower()) then
-                        print("✅ تم العثور على التشخيص: " .. medicine)
-                        return medicine
-                    end
-                end
-            end
-        end
-    end
-    
-    print("⚠️ لم أتمكن من قراءة التشخيص بعد")
-    return nil
-end
-
--- ==========================================
--- دالة المشي ورسم المسار الذكي
--- ==========================================
-local function walkToTarget(targetInstance)
-    if not targetInstance then return end
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    local humanoid = character:FindFirstChild("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not rootPart or humanoid.Health <= 0 then return end
-    
-    local targetPosition = targetInstance:IsA("BasePart") and targetInstance.Position or (targetInstance:IsA("Model") and targetInstance.PrimaryPart and targetInstance.PrimaryPart.Position) or targetInstance:GetModelCFrame().Position
-    
-    local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4})
-    pcall(function() path:ComputeAsync(rootPart.Position, targetPosition) end)
-    
-    if path.Status == Enum.PathStatus.Success then
-        for _, waypoint in ipairs(path:GetWaypoints()) do
-            if humanoid.Health <= 0 then break end
-            humanoid:MoveTo(waypoint.Position)
-            if waypoint.Action == Enum.PathWaypointAction.Jump then humanoid.Jump = true end
-            humanoid.MoveToFinished:Wait()
-        end
-    else
-        humanoid:MoveTo(targetPosition)
-    end
-end
-
--- ==========================================
--- دالة تفعيل ProximityPrompt بطرق متعددة
--- ==========================================
-local function activatePrompt(prompt, duration)
-    if not prompt then 
-        warn("⚠️ Prompt غير موجود")
-        return false 
-    end
-    
-    duration = duration or 1
-    local activated = false
-    
-    -- المحاولة 1: استخدام fireproximityprompt (الأسرع والأكثر موثوقية)
-    if fireproximityprompt then
-        pcall(function()
-            print("📍 محاولة: fireproximityprompt")
-            fireproximityprompt(prompt)
-            task.wait(duration)
-            activated = true
-        end)
-        if activated then return true end
-    end
-    
-    -- المحاولة 2: محاكاة الضغط المطول عبر UserInputService
-    local UserInputService = game:GetService("UserInputService")
-    if UserInputService then
-        pcall(function()
-            print("📍 محاولة: UserInputService بضغط مطول")
-            -- محاكاة الضغط على Enter (الزر الافتراضي)
-            UserInputService:SendKeyEvent(true, Enum.KeyCode.E, false)
-            task.wait(duration)
-            UserInputService:SendKeyEvent(false, Enum.KeyCode.E, false)
-            activated = true
-        end)
-        if activated then return true end
-    end
-    
-    -- المحاولة 3: تفعيل الحدث PromptTriggered مباشرة
-    if prompt.Triggered then
-        pcall(function()
-            print("📍 محاولة: Triggered event")
-            prompt:Fire()
-            task.wait(duration)
-            activated = true
-        end)
-        if activated then return true end
-    end
-    
-    -- المحاولة 4: محاكاة InputBegan و InputEnded مع Touch
-    if prompt.PromptButtonHoldBegan then
-        pcall(function()
-            print("📍 محاولة: PromptButtonHoldBegan")
-            prompt.PromptButtonHoldBegan:Fire()
-            task.wait(duration)
-            if prompt.PromptButtonHoldEnded then
-                prompt.PromptButtonHoldEnded:Fire()
-            end
-            activated = true
-        end)
-        if activated then return true end
-    end
-    
-    -- المحاولة 5: التعديل المباشر على خصائص Prompt
-    if prompt.ActionText then
-        pcall(function()
-            print("📍 محاولة: تعديل الخصائص والتفعيل")
-            local oldActionText = prompt.ActionText
-            prompt.ActionText = oldActionText
-            task.wait(0.1)
-            
-            if prompt.Triggered then
-                prompt.Triggered:Connect(function()
-                    print("✅ تم التفعيل بنجاح!")
-                end)
-                prompt:Fire()
-            end
-            task.wait(duration)
-            activated = true
-        end)
-        if activated then return true end
-    end
-    
-    if not activated then
-        warn("⚠️ فشلت جميع محاولات التفعيل للـ Prompt")
-    end
-    
-    return activated
-end
-
--- ==========================================
--- الاستماع للمهمات وإدارة الدورة الكاملة (محسّنة)
--- ==========================================
-task.spawn(function()
-    while not initializeDependencies() do
-        warn("⏳ جاري إعادة محاولة تحميل الاعتمادات...")
-        task.wait(1)
-    end
-
-    local character = waitForCharacter(15)
-    if not character then
-        warn("⚠️ لم يتم العثور على Character بعد انتظار طويل")
-        updateStatus("⚠️ Character not found", "The script is waiting for your character to load.", "Success: 0 | Failed: 0")
-    else
-        updateStatus("✅ Character ready", "Listening for objectives...", "Success: 0 | Failed: 0")
-    end
-
-    SetObjectiveEvent.OnClientEvent:Connect(function(objectiveText, unusedVar, targetInstance)
-        if targetInstance and typeof(targetInstance) == "Instance" then
-            updateStatus("🧭 Moving to target", "A target was received.", "Success: " .. stats.successCount .. " | Failed: " .. stats.failureCount)
-            task.spawn(function() walkToTarget(targetInstance) end)
-            return
-        end
-        
-        if typeof(objectiveText) == "string" then
-            local lowerText = objectiveText:lower()
-            
-            if string.find(lowerText, "treat") and string.find(lowerText, "patient") then
-                updateStatus("🛠️ Handling patient", "Searching for patient and tools...", "Success: " .. stats.successCount .. " | Failed: " .. stats.failureCount)
-                task.spawn(function()
-                    local success = false
-                    local maxRetries = 2
-                    local attempt = 0
-                    
-                    while attempt < maxRetries and not success do
-                        attempt = attempt + 1
-                        print("🔄 محاولة " .. attempt .. " من " .. maxRetries)
-                        
-                        -- 1. التوجه للمريض
-                        local patient = findPatientTarget()
-                        if not patient then
-                            warn("❌ لم أجد المريض")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        print("🏃 التوجه للمريض...")
-                        walkToTarget(patient)
-                        task.wait(0.8)
-                        
-                        -- 2. التوجه للكمبيوتر والتحليل
-                        local compPart, compPrompt = interactWithComputer()
-                        if not compPart or not compPrompt then
-                            warn("❌ لم أجد الكمبيوتر")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        print("🖥️ التوجه للكمبيوتر...")
-                        walkToTarget(compPart)
-                        task.wait(0.5) -- زيادة الانتظار قليلاً
-                        
-                        -- تفعيل الكمبيوتر مع محاولات متعددة
-                        print("💻 جاري تفعيل جهاز الفحص...")
-                        local computerActivated = false
-                        for tryCount = 1, 3 do
-                            print("  محاولة تفعيل " .. tryCount .. " من 3")
-                            computerActivated = activatePrompt(compPrompt, 1.5)
-                            if computerActivated then
-                                print("✅ تم تفعيل جهاز الفحص بنجاح!")
-                                break
-                            end
-                            task.wait(0.5)
-                        end
-                        
-                        if not computerActivated then
-                            warn("⚠️ فشل تفعيل جهاز الفحص بعد 3 محاولات")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        -- 3. انتظار ظهور النتيجة وقراءتها
-                        print("⏳ جاري انتظار نتيجة الفحص...")
-                        local diagnosis = nil
-                        for i = 1, 8 do -- 8 محاولات × 0.5 ثانية = 4 ثواني
-                            task.wait(0.5)
-                            diagnosis = getDiagnosisFromMonitor()
-                            if diagnosis then
-                                print("✅ تم الحصول على النتيجة!")
-                                break
-                            end
-                            if i % 2 == 0 then print("  ...جاري البحث " .. i .. "/8") end
-                        end
-                        
-                        if not diagnosis then
-                            warn("❌ فشل قراءة التشخيص بعد الانتظار")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        print("💊 الدواء المطلوب: " .. diagnosis)
-                        
-                        -- 4. البحث عن الدواء والذهاب إليه
-                        local medicineObject, medicinePrompt = findItemAndPrompt(diagnosis)
-                        if not medicineObject or not medicinePrompt then
-                            warn("❌ لم أجد الدواء: " .. diagnosis)
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        print("🏃 التوجه لأخذ الدواء: " .. diagnosis)
-                        walkToTarget(medicineObject)
-                        task.wait(0.5)
-                        
-                        -- تفعيل أخذ الدواء مع محاولات متعددة
-                        print("💊 جاري أخذ الدواء بضغط مطول...")
-                        local medicineActivated = false
-                        for tryCount = 1, 3 do
-                            print("  محاولة أخذ الدواء " .. tryCount .. " من 3")
-                            medicineActivated = activatePrompt(medicinePrompt, 1.5)
-                            if medicineActivated then
-                                print("✅ تم سحب الدواء بنجاح!")
-                                break
-                            end
-                            task.wait(0.5)
-                        end
-                        
-                        if not medicineActivated then
-                            warn("⚠️ فشل أخذ الدواء بعد 3 محاولات")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        task.wait(0.8)
-                        
-                        -- 5. العودة للمريض وإعطاء الدواء
-                        print("🏃 العودة للمريض...")
-                        walkToTarget(patient)
-                        task.wait(0.5)
-                        
-                        -- البحث عن زر الإعطاء
-                        local givePrompt = patient:FindFirstChildOfClass("ProximityPrompt") or patient:FindFirstChild("ProximityPrompt", true)
-                        if not givePrompt then
-                            warn("⚠️ لم أجد زر إعطاء الدواء")
-                            task.wait(1)
-                            goto next_attempt
-                        end
-                        
-                        -- إعطاء الدواء
-                        print("💉 جاري إعطاء الدواء للمريض...")
-                        local giveActivated = false
-                        for tryCount = 1, 3 do
-                            print("  محاولة إعطاء الدواء " .. tryCount .. " من 3")
-                            giveActivated = activatePrompt(givePrompt, 1.5)
-                            if giveActivated then
-                                print("✅ تم إعطاء الدواء بنجاح!")
-                                break
-                            end
-                            task.wait(0.5)
-                        end
-                        
-                        if giveActivated then
-                            print("🎉 تمت معالجة المريض بنجاح!")
-                            stats.successCount = stats.successCount + 1
-                            updateStatus("✅ Task completed", "Patient treated successfully.", "Success: " .. stats.successCount .. " | Failed: " .. stats.failureCount)
-                            printStats()
-                            success = true
-                        else
-                            warn("⚠️ فشل إعطاء الدواء بعد 3 محاولات")
-                            updateStatus("⚠️ Task failed", "The treatment attempt failed.", "Success: " .. stats.successCount .. " | Failed: " .. stats.failureCount)
-                            task.wait(1)
-                        end
-                        
-                        ::next_attempt::
-                    end
-                    
-                    stats.totalAttempts = stats.totalAttempts + 1
-                    if not success then
-                        stats.failureCount = stats.failureCount + 1
-                        warn("❌ فشلت المهمة بعد " .. maxRetries .. " محاولات")
-                        updateStatus("⚠️ Task failed", "All retries were exhausted.", "Success: " .. stats.successCount .. " | Failed: " .. stats.failureCount)
-                        printStats()
-                    end
-                end)
-            end
-        end
-    end)
-
-    print("🚀 السكربت جاهز الآن ويستمع للمهمات")
+ToggleButton.InputChanged:Connect(function(input)
+ if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+  dragInput = input
+ end
 end)
 
-print("\n" .. string.rep("✨", 25))
-print("🧪 SCRIPT STARTED")
-print("🚀 تم تشغيل السكربت المحسّن بنجاح!")
-print("📍 معلومات السكربت:")
-print("  ✓ محاكاة ضغط مطول محسّنة (5 طرق مختلفة)")
-print("  ✓ بحث ذكي عن العناصر مع التخزين المؤقت")
-print("  ✓ إعادة محاولة تلقائية عند الفشل")
-print("  ✓ رسائل تشخيصية مفصلة")
-print("  ✓ إحصائيات الأداء المباشرة")
-print("⏳ في انتظار المهام...")
-print(string.rep("✨", 25) .. "\n")
+UserInputService.InputChanged:Connect(function(input)
+ if input == dragInput and dragging then
+  update(input)
+ end
+end)
 
--- ===== معلومات مهمة =====
-print("💡 ملاحظات مهمة:")
-print("  - السكربت يحتاج Lib و Network من اللعبة")
-print("  - تأكد من وجود fireproximityprompt في اللعبة")
-print("  - اترك السكربت يعمل آلياً")
-print("")
+-- برمجة ضغطة الزر للتفعيل والإيقاف
+ToggleButton.MouseButton1Click:Connect(function()
+ sanityEnabled = not sanityEnabled
+ if sanityEnabled then
+  -- تغيير اللون للأخضر وتفعيل الحماية
+  ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+  ToggleButton.Text = "Sanity: ON"
+  keepSanityFull() -- تشغيل فوري عند الضغط
+ else
+  -- تغيير اللون للأحمر وإيقاف الحماية
+  ToggleButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+  ToggleButton.Text = "Sanity: OFF"
+ end
+end)
