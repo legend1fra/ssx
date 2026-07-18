@@ -1595,9 +1595,9 @@ local function LogRemote(
 		Blocked: boolean?,
 	}
 )
-	local Log = GetLog(Instance, Function)
 	SaveRemoteCaptureEntry("Incoming", Instance, Info)
 
+	local Log = GetLog(Instance, Function)
 	if not Log then
 		return false, nil
 	end
@@ -2212,6 +2212,12 @@ end
 
 local function GetRemoteCapturePaths(): { string }
 	return {
+		"/sdcard/Download/Cobalt/AllRemoteCaptures.txt",
+		"/storage/emulated/0/Download/Cobalt/AllRemoteCaptures.txt",
+		"/storage/emulated/0/Documents/Cobalt/AllRemoteCaptures.txt",
+		"/sdcard/Documents/Cobalt/AllRemoteCaptures.txt",
+		"Cobalt/AllRemoteCaptures.txt",
+		"AllRemoteCaptures.txt",
 		"/sdcard/Download/Cobalt/RemoteCaptures.txt",
 		"/storage/emulated/0/Download/Cobalt/RemoteCaptures.txt",
 		"/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt",
@@ -2228,30 +2234,6 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 
 	if wax.shared.RemoteCaptureEnabled == false then
 		return
-	end
-
-	local CacheKey = nil
-	if Info and type(Info) == "table" then
-		CacheKey = string.format(
-			"%s|%s|%s|%s|%s|%s",
-			tostring(Direction),
-			tostring(Instance),
-			tostring(Info.Origin),
-			tostring(Info.Function),
-			tostring(Info.Line),
-			tostring(Info.Arguments)
-		)
-	end
-
-	if CacheKey then
-		local Now = os.clock()
-		local LastSeen = wax.shared.RemoteCaptureLastSeen or {}
-		local LastTime = LastSeen[CacheKey]
-		if LastTime and (Now - LastTime) < 0.35 then
-			return
-		end
-		LastSeen[CacheKey] = Now
-		wax.shared.RemoteCaptureLastSeen = LastSeen
 	end
 
 	local function SafeSerialize(Value: any): string
@@ -2382,9 +2364,7 @@ local function HandleLogging(TargetInstance: Instance, Method: string, OldFuncti
 	}
 	local ShouldBlock = Log:ShouldBlock(Info)
 	Log:Call(Info)
-	if not wax.shared.RemoteCaptureSuppressed then
-		SaveRemoteCaptureEntry("Outgoing", TargetInstance, Info)
-	end
+	SaveRemoteCaptureEntry("Outgoing", TargetInstance, Info)
 	if ShouldBlock then
 		return
 	end
