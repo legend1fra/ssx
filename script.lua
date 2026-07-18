@@ -12,70 +12,93 @@ local SetObjectiveEvent = nil
 local statusLabel = nil
 local detailLabel = nil
 local statsLabel = nil
+local guiReady = false
 
 local function createStatusGui()
-    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "AutomationStatusGui"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = playerGui
+    local ok, result = pcall(function()
+        local player = Players.LocalPlayer
+        if not player then
+            return nil
+        end
 
-    local frame = Instance.new("Frame")
-    frame.Name = "MainFrame"
-    frame.Size = UDim2.new(0, 280, 0, 140)
-    frame.Position = UDim2.new(0.02, 0, 0.02, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    frame.BorderSizePixel = 0
-    frame.Parent = screenGui
+        local playerGui = player:WaitForChild("PlayerGui", 5)
+        if not playerGui then
+            return nil
+        end
 
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -12, 0, 24)
-    title.Position = UDim2.new(0, 6, 0, 8)
-    title.Text = "Automation Status"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 15
-    title.Parent = frame
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "AutomationStatusGui"
+        screenGui.ResetOnSpawn = false
+        screenGui.Parent = playerGui
 
-    statusLabel = Instance.new("TextLabel")
-    statusLabel.Name = "Status"
-    statusLabel.Size = UDim2.new(1, -12, 0, 24)
-    statusLabel.Position = UDim2.new(0, 6, 0, 36)
-    statusLabel.Text = "⏳ Waiting..."
-    statusLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Font = Enum.Font.GothamSemibold
-    statusLabel.TextSize = 14
-    statusLabel.Parent = frame
+        local frame = Instance.new("Frame")
+        frame.Name = "MainFrame"
+        frame.Size = UDim2.new(0, 280, 0, 140)
+        frame.Position = UDim2.new(0.02, 0, 0.02, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        frame.BorderSizePixel = 0
+        frame.Parent = screenGui
 
-    detailLabel = Instance.new("TextLabel")
-    detailLabel.Name = "Detail"
-    detailLabel.Size = UDim2.new(1, -12, 0, 44)
-    detailLabel.Position = UDim2.new(0, 6, 0, 64)
-    detailLabel.Text = "Script is starting..."
-    detailLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    detailLabel.BackgroundTransparency = 1
-    detailLabel.Font = Enum.Font.Gotham
-    detailLabel.TextSize = 12
-    detailLabel.Parent = frame
+        local title = Instance.new("TextLabel")
+        title.Name = "Title"
+        title.Size = UDim2.new(1, -12, 0, 24)
+        title.Position = UDim2.new(0, 6, 0, 8)
+        title.Text = "Automation Status"
+        title.TextColor3 = Color3.fromRGB(255, 255, 255)
+        title.BackgroundTransparency = 1
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 15
+        title.Parent = frame
 
-    statsLabel = Instance.new("TextLabel")
-    statsLabel.Name = "Stats"
-    statsLabel.Size = UDim2.new(1, -12, 0, 24)
-    statsLabel.Position = UDim2.new(0, 6, 0, 110)
-    statsLabel.Text = "Success: 0 | Failed: 0"
-    statsLabel.TextColor3 = Color3.fromRGB(120, 220, 120)
-    statsLabel.BackgroundTransparency = 1
-    statsLabel.Font = Enum.Font.Gotham
-    statsLabel.TextSize = 12
-    statsLabel.Parent = frame
+        statusLabel = Instance.new("TextLabel")
+        statusLabel.Name = "Status"
+        statusLabel.Size = UDim2.new(1, -12, 0, 24)
+        statusLabel.Position = UDim2.new(0, 6, 0, 36)
+        statusLabel.Text = "⏳ Waiting..."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+        statusLabel.BackgroundTransparency = 1
+        statusLabel.Font = Enum.Font.GothamSemibold
+        statusLabel.TextSize = 14
+        statusLabel.Parent = frame
 
-    return screenGui
+        detailLabel = Instance.new("TextLabel")
+        detailLabel.Name = "Detail"
+        detailLabel.Size = UDim2.new(1, -12, 0, 44)
+        detailLabel.Position = UDim2.new(0, 6, 0, 64)
+        detailLabel.Text = "Script is starting..."
+        detailLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+        detailLabel.BackgroundTransparency = 1
+        detailLabel.Font = Enum.Font.Gotham
+        detailLabel.TextSize = 12
+        detailLabel.Parent = frame
+
+        statsLabel = Instance.new("TextLabel")
+        statsLabel.Name = "Stats"
+        statsLabel.Size = UDim2.new(1, -12, 0, 24)
+        statsLabel.Position = UDim2.new(0, 6, 0, 110)
+        statsLabel.Text = "Success: 0 | Failed: 0"
+        statsLabel.TextColor3 = Color3.fromRGB(120, 220, 120)
+        statsLabel.BackgroundTransparency = 1
+        statsLabel.Font = Enum.Font.Gotham
+        statsLabel.TextSize = 12
+        statsLabel.Parent = frame
+
+        return screenGui
+    end)
+
+    if not ok then
+        warn("⚠️ Failed to create status UI: " .. tostring(result))
+        return nil
+    end
+
+    return result
 end
 
 local function updateStatus(text, detailText, statsText)
+    if not guiReady then
+        return
+    end
+
     if statusLabel then
         statusLabel.Text = text or statusLabel.Text
     end
@@ -87,7 +110,32 @@ local function updateStatus(text, detailText, statsText)
     end
 end
 
-createStatusGui()
+local function ensureStatusGui()
+    if guiReady then
+        return
+    end
+
+    local player = Players.LocalPlayer
+    if not player then
+        print("🧪 Script started; waiting for LocalPlayer...")
+        task.wait(1)
+        player = Players.LocalPlayer
+    end
+
+    local gui = createStatusGui()
+    if gui then
+        guiReady = true
+        updateStatus("🧪 Script started", "Waiting for game data...", "Ready")
+    else
+        print("🧪 Script started; UI will appear once LocalPlayer is ready")
+    end
+end
+
+task.spawn(function()
+    pcall(function()
+        ensureStatusGui()
+    end)
+end)
 
 local function waitForChild(parent, childName, timeout)
     timeout = timeout or 10
@@ -142,6 +190,7 @@ local function initializeDependencies()
     end
 
     updateStatus("✅ Script ready", "Waiting for task...", "Success: 0 | Failed: 0")
+    print("✅ Script ready and listening for tasks")
     return true
 end
 
@@ -626,6 +675,7 @@ task.spawn(function()
 end)
 
 print("\n" .. string.rep("✨", 25))
+print("🧪 SCRIPT STARTED")
 print("🚀 تم تشغيل السكربت المحسّن بنجاح!")
 print("📍 معلومات السكربت:")
 print("  ✓ محاكاة ضغط مطول محسّنة (5 طرق مختلفة)")
