@@ -2211,42 +2211,12 @@ local function getcallingsource()
 	return debug.info(BaseLevel, "s")
 end
 
-local function GetRemoteCapturePaths(): { string }
-	return {
-		"/sdcard/Download/Cobalt/RemoteCaptures.txt",
-		"/storage/emulated/0/Download/Cobalt/RemoteCaptures.txt",
-		"/storage/emulated/0/Documents/Cobalt/RemoteCaptures.txt",
-		"/sdcard/Documents/Cobalt/RemoteCaptures.txt",
-		"Cobalt/RemoteCaptures.txt",
-		"RemoteCaptures.txt",
-	}
-end
-
 local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, Info: { [string]: any }?)
 	if not wax.shared or not wax.shared.HttpService then
 		return
 	end
 
-	if wax.shared.RemoteCaptureEnabled == false then
-		return
-	end
-
-	local CacheKey = nil
-	if Info and type(Info) == "table" then
-		CacheKey = string.format("%s|%s|%s|%s", tostring(Direction), tostring(Instance), tostring(Info.Origin), tostring(Info.Function))
-	end
-
-	if CacheKey then
-		local Now = os.clock()
-		local LastSeen = wax.shared.RemoteCaptureLastSeen or {}
-		local LastTime = LastSeen[CacheKey]
-		if LastTime and (Now - LastTime) < 0.35 then
-			return
-		end
-		LastSeen[CacheKey] = Now
-		wax.shared.RemoteCaptureLastSeen = LastSeen
-	end
-
+	local FileName = "Cobalt/RemoteCaptures.txt"
 	local function SafeSerialize(Value: any): string
 		local Success, Encoded = pcall(function()
 			return wax.shared.HttpService:JSONEncode(Value)
@@ -2280,47 +2250,19 @@ local function SaveRemoteCaptureEntry(Direction: string, Instance: Instance?, In
 		SafeSerialize(Info and Info.Arguments or {})
 	)
 
-	local SavedPath = nil
-	local SaveError = nil
-
-	for _, CandidatePath in GetRemoteCapturePaths() do
-		local Success, Error = pcall(function()
-			local FolderPath = CandidatePath:match("^(.*)[/\\][^/\\]+$")
-			if FolderPath and FolderPath ~= "" then
-				pcall(makefolder, FolderPath)
-			end
-
-			local Exists = false
-			local FileStatus = pcall(isfile, CandidatePath)
-			if FileStatus then
-				Exists = isfile(CandidatePath)
-			end
-
-			if Exists then
-				appendfile(CandidatePath, Entry)
-			else
-				writefile(CandidatePath, Entry)
-			end
-		end)
-
+	pcall(function()
+		local Exists = false
+		local Success, IsFile = pcall(isfile, FileName)
 		if Success then
-			SavedPath = CandidatePath
-			break
-		else
-			SaveError = Error
+			Exists = IsFile
 		end
-	end
 
-	if SavedPath then
-		wax.shared.LastRemoteCapturePath = SavedPath
-		if not wax.shared.RemoteCaptureDebugShown then
-			print(`[Cobalt] Remote capture saved to: {SavedPath}`)
-			wax.shared.RemoteCaptureDebugShown = true
+		if Exists then
+			appendfile(FileName, Entry)
+		else
+			writefile(FileName, Entry)
 		end
-	elseif not wax.shared.RemoteCaptureDebugShown then
-		warn(`[Cobalt] Remote capture save failed. Checked common Android paths. Executor may not support writefile.`)
-		wax.shared.RemoteCaptureDebugShown = true
-	end
+	end)
 end
 
 --[[
@@ -2350,6 +2292,7 @@ local function HandleLoggingResult(Log, Info, ResultKey, ...)
 	local Result = wax.shared.SafePack.Pack(...)
 	Info[ResultKey] = Result
 	Log:Call(Info)
+	SaveRemoteCaptureEntry("Outgoing", Info.Origin, Info)
 
 	return ...
 end
@@ -13204,44 +13147,6 @@ local MainFrame = Interface.New("Frame", {
 	Constants.MainUICorner,
 	Parent = ScreenGui,
 })
-
-local RemoteSaveToggle = Interface.New("TextButton", {
-	Name = "RemoteSaveToggle",
-	BackgroundColor3 = Color3.fromRGB(44, 120, 255),
-	Position = UDim2.fromOffset(16, 16),
-	Size = UDim2.fromOffset(182, 34),
-	Text = "Remote Save: ON",
-	TextColor3 = Color3.new(1, 1, 1),
-	Font = Enum.Font.GothamSemibold,
-	TextSize = 13,
-	ZIndex = 10,
-	Parent = MainFrame,
-
-	Constants.MainUICorner,
-	["UIStroke"] = {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = Color3.new(1, 1, 1),
-		Transparency = 0.15,
-	},
-})
-do
-	wax.shared.RemoteCaptureEnabled = true
-	RemoteSaveToggle.MouseButton1Click:Connect(function()
-		wax.shared.RemoteCaptureEnabled = not wax.shared.RemoteCaptureEnabled
-		RemoteSaveToggle.Text = wax.shared.RemoteCaptureEnabled and "Remote Save: ON" or "Remote Save: OFF"
-		RemoteSaveToggle.BackgroundColor3 = wax.shared.RemoteCaptureEnabled
-			and Color3.fromRGB(44, 120, 255)
-			or Color3.fromRGB(95, 95, 95)
-		if wax.shared.Sonner then
-			if wax.shared.RemoteCaptureEnabled then
-				wax.shared.Sonner.success("Remote capture saving enabled")
-			else
-				wax.shared.Sonner.info("Remote capture saving paused")
-			end
-		end
-	end)
-end
-
 do
 	Resize.new({
 		MainFrame = MainFrame,
