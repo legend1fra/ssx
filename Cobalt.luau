@@ -293,78 +293,93 @@ wax.shared.Unload = function()
 	end
 	table.clear(wax.shared.Connections)
 
-	for _, Category in wax.shared.Logs do
-		for _, Log in Category do
-			Log:ClearCalls()
+	for _, ScriptRef in next, ScriptsToRun do
+		Defer(LoadScript, ScriptRef)
+	end
+
+	-- Save IO Button (non-intrusive addition)
+	do
+		local ok, Cobalt = pcall(function() return getgenv().Cobalt end)
+		if not ok or not Cobalt or not Cobalt.shared then
+			return
 		end
-		table.clear(Category)
-	end
-	table.clear(wax.shared.Logs)
-	table.clear(wax.shared.IncomingLogConnectionFunctions)
 
-	getgenv().CobaltInitialized = false
-	getgenv().Cobalt = nil
+		local shared = Cobalt.shared
+		pcall(function()
+			local player = (shared.Players and shared.Players.LocalPlayer) or nil
+			local parent = nil
+			if player and type(player) == "userdata" and player.PlayerGui then
+				parent = player.PlayerGui
+			end
 
-	wax.shared.Communicator:Destroy()
-	wax.shared.ScreenGui:Destroy()
+			parent = parent or ((shared.gethui and shared.gethui()) or shared.CoreGui)
+			if not parent then
+				return
+			end
 
-	wax.shared.Unloaded = true
-end
+			local existing = parent:FindFirstChild("Cobalt_SaveIO_Gui")
+			local screenGui = existing or Instance.new("ScreenGui")
+			if not existing then
+				screenGui.Name = "Cobalt_SaveIO_Gui"
+				screenGui.ResetOnSpawn = false
+				screenGui.IgnoreGuiInset = true
+				screenGui.Parent = parent
+			end
 
-local AnticheatData = require(script.Utils.Anticheats.Main)
+			local btn = screenGui:FindFirstChild("Cobalt_SaveIO_Button")
+			if not btn then
+				btn = Instance.new("TextButton")
+				btn.Name = "Cobalt_SaveIO_Button"
+				btn.Size = UDim2.new(0, 140, 0, 32)
+				btn.Position = UDim2.new(0, 10, 0, 10)
+				btn.AnchorPoint = Vector2.new(0, 0)
+				btn.Text = "Save IO Logs"
+				btn.TextSize = 14
+				btn.BackgroundTransparency = 0.2
+				btn.ZIndex = 999999
+				btn.Parent = screenGui
+			end
 
--- Load Script
-wax.shared.Communicator = Instance.new("BindableEvent")
+			btn.Visible = true
 
-wax.shared.SetupLoggingConnection = function()
-	if wax.shared.LogConnection then
-		wax.shared.LogConnection:Disconnect()
-	end
-
-	if wax.shared.LogThread then
-		pcall(task.cancel, wax.shared.LogThread)
-		wax.shared.LogThread = nil
-	end
-
-	wax.shared.LogFileName = `Cobalt/Logs/{DateTime.now():ToIsoDate():gsub(":", "_")}.log`
-	local FileLog = FileLogger.new(wax.shared.LogFileName, FileLogger.LOG_LEVELS.INFO, true)
-
-	local LogQueue = {}
-	local LogQueueHead = 1
-	local LogQueueTail = 0
-	wax.shared.LogThread = task.defer(function()
-		while not wax.shared.Unloaded do
-			while LogQueueHead <= LogQueueTail do
-				local Entry = LogQueue[LogQueueHead]
-				LogQueue[LogQueueHead] = nil
-				LogQueueHead += 1
-
-				if not Entry then
-					continue
-				end
-
-				local RemoteInstance = Entry.Instance
-				local Type = Entry.Type
-				local CallOrderInLog = Entry.CallIndex
-				local CallDataFromHook = Entry.CallData
-
+			btn.MouseButton1Click:Connect(function()
 				local success, err = pcall(function()
-					local generatedCode = CodeGen:BuildCallCode(setmetatable({
-						Instance = RemoteInstance,
-						Type = Type,
-					}, {
-						__index = CallDataFromHook,
-					}) :: any)
+					local folder = "Cobalt-Exports"
+					pcall(makefolder, folder)
+					local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
 
-					local comprehensiveDataToSerialize = {
-						RemoteInstanceInfo = {
-							Name = RemoteInstance and RemoteInstance.Name,
-							ClassName = RemoteInstance and RemoteInstance.ClassName,
-							Path = RemoteInstance and InstanceSerializer.Serialize(RemoteInstance, {
-								DisableNilParentHandler = true,
-							}),
-						},
-						EventType = Type,
+					local out = nil
+					local inc = nil
+					if shared.LuaEncode then
+						out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
+						inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
+					else
+						out = tostring(shared.Logs and shared.Logs.Outgoing or "")
+						inc = tostring(shared.Logs and shared.Logs.Incoming or "")
+					end
+
+					local content = table.concat({
+						"=== OUTGOING ===",
+						out,
+						"=== INCOMING ===",
+						inc,
+					}, "\n\n")
+
+					writefile(filename, content)
+
+					if shared.Sonner and shared.Sonner.success then
+						pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Saved IO logs to " .. filename)
+					else
+						print("Cobalt: Saved IO logs to " .. filename)
+					end
+				end)
+
+				if not success then
+					warn("Cobalt: Failed to save IO logs - " .. tostring(err))
+				end
+			end)
+		end)
+	end
 						CallOrderInLog = CallOrderInLog,
 						DataFromHook = CallDataFromHook,
 					}
