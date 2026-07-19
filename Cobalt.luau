@@ -25207,25 +25207,31 @@ for _, ScriptRef in next, ScriptsToRun do
 end
 
 -- Auto-save incoming/outgoing data to a local text file without changing core behavior
-local AutoSaveDir = "/storage/emulated/Delta/"
 local AutoSaveCandidates = {
-    AutoSaveDir .. "xxx.txt",
+    "/storage/emulated/Delta/xxx.txt",
+    "/storage/emulated/0/xxx.txt",
     "xxx.txt",
+    "Cobalt/xxx.txt",
 }
 
-local function CreateAutoSaveFile(Path)
-    if makefolder then
-        pcall(makefolder, AutoSaveDir)
+local function TryCreateFile(Path)
+    local Parent = string.match(Path, "^(.*)/[^/]+$")
+    if Parent and makefolder then
+        pcall(makefolder, Parent)
     end
 
     if writefile then
-        pcall(writefile, Path, "")
-        return true
+        local Success = pcall(writefile, Path, "")
+        if Success then
+            return true
+        end
     end
 
     if appendfile then
-        pcall(appendfile, Path, "")
-        return true
+        local Success = pcall(appendfile, Path, "")
+        if Success then
+            return true
+        end
     end
 
     return false
@@ -25233,7 +25239,7 @@ end
 
 local function EnsureAutoSaveFile()
     for _, Path in ipairs(AutoSaveCandidates) do
-        if CreateAutoSaveFile(Path) then
+        if TryCreateFile(Path) then
             AutoSaveCandidates[1] = Path
             return Path
         end
