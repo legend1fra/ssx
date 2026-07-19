@@ -25212,6 +25212,8 @@ local AutoSaveCandidates = {
     "/storage/emulated/0/xxx.txt",
     "xxx.txt",
     "Cobalt/xxx.txt",
+    "./xxx.txt",
+    ".\\xxx.txt",
 }
 
 local AutoSaveDebugPath = "xxx_debug.txt"
@@ -25292,6 +25294,15 @@ local function SerializePayload(Value)
         return Value
     end
 
+    if type(Value) == "table" then
+        local Success, Encoded = pcall(function()
+            return string.format("table: %s", tostring(Value))
+        end)
+        if Success then
+            return Encoded
+        end
+    end
+
     local CobaltEnv = type(getgenv) == "function" and getgenv().Cobalt or nil
     local LuaEncode = CobaltEnv and CobaltEnv.shared and CobaltEnv.shared.LuaEncode or nil
     if LuaEncode then
@@ -25313,13 +25324,18 @@ local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
         return
     end
 
+    local DirectionLabel = tostring(Direction or "Unknown")
+    local RemoteLabel = LogObject and LogObject.Instance and tostring(LogObject.Instance) or "Unknown"
+    local PayloadText = SerializePayload(RawInfo)
+
     local Entry = table.concat({
         "==============================",
         ("Time: %s"):format(FormatTimestamp()),
-        ("Direction: %s"):format(Direction or "Unknown"),
-        ("Remote: %s"):format(LogObject and LogObject.Instance and tostring(LogObject.Instance) or "Unknown"),
+        ("Direction: %s"):format(DirectionLabel),
+        ("Remote: %s"):format(RemoteLabel),
+        ("Kind: %s"):format(DirectionLabel == "Incoming" and "Incoming" or (DirectionLabel == "Outgoing" and "Outgoing" or "Other")),
         "Payload:",
-        SerializePayload(RawInfo),
+        PayloadText,
         "",
     }, "\n")
 
