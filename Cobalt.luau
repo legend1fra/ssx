@@ -316,52 +316,6 @@ local AnticheatData = require(script.Utils.Anticheats.Main)
 -- Load Script
 wax.shared.Communicator = Instance.new("BindableEvent")
 
-local AutoSavePath = "Cobalt/AutoSave/traffic_log.txt"
-local function EnsureAutoSaveFile()
-	local success, err = pcall(function()
-		if not isfolder("Cobalt") then
-			makefolder("Cobalt")
-		end
-		if not isfolder("Cobalt/AutoSave") then
-			makefolder("Cobalt/AutoSave")
-		end
-		if not isfile(AutoSavePath) then
-			writefile(AutoSavePath, "Cobalt Auto-Save Log\n")
-		end
-		appendfile(AutoSavePath, ("[Startup] %s\n"):format(tostring(tick())))
-	end)
-
-	if not success then
-		warn(("Cobalt: Failed to initialize auto-save file - %s"):format(tostring(err)))
-	end
-end
-
-EnsureAutoSaveFile()
-
-local function AppendAutoSaveEntry(EntryType, InstanceName, InstanceClassName, InstancePath, CallOrderInLog, SerializedEventData, GeneratedCode)
-	local timestamp = tostring(tick())
-	local entry = string.format(
-		"\n==================== %s ====================\nTime: %s\nInstance: %s\nClass: %s\nPath: %s\nCall Order: %s\nData:\n%s\nGenerated Code:\n%s\n",
-		EntryType or "Unknown",
-		timestamp,
-		InstanceName or "UnknownInstance",
-		InstanceClassName or "UnknownClass",
-		InstancePath or "UnknownPath",
-		tostring(CallOrderInLog or "N/A"),
-		SerializedEventData or "N/A",
-		GeneratedCode or "N/A"
-	)
-
-	local success, err = pcall(function()
-		EnsureAutoSaveFile()
-		appendfile(AutoSavePath, entry)
-	end)
-
-	if not success then
-		warn(("Cobalt: Failed to auto-save traffic data - %s"):format(tostring(err)))
-	end
-end
-
 wax.shared.SetupLoggingConnection = function()
 	if wax.shared.LogConnection then
 		wax.shared.LogConnection:Disconnect()
@@ -440,16 +394,6 @@ wax.shared.SetupLoggingConnection = function()
 					}
 					local logMessage = table.concat(logParts, "\n\t")
 					local threadId = ("%s:%s"):format(Type or "S", instanceName)
-
-					AppendAutoSaveEntry(
-						Type or "Unknown",
-						instanceName,
-						instanceClassName,
-						instancePath,
-						CallOrderInLog,
-						serializedEventData,
-						generatedCode
-					)
 
 					FileLog:Info(threadId, logMessage)
 				end)
@@ -6973,6 +6917,58 @@ function FileHelper:AppendFile(relativePath: string, data: string)
     appendfile(self:GetPath(relativePath), data)
 end
 
+local AutoSaveFilePath = "/storage/emulated/Delta/xxx.txt"
+
+local function AutoSaveRemoteData(Direction: string, Info: table)
+    if not writefile or not appendfile then
+        return
+    end
+
+    local Timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local Entry = `[{Timestamp}] {Direction}` .. "\n"
+    if Info.Origin then
+        Entry ..= `Origin: {tostring(Info.Origin)}` .. "\n"
+    end
+    if Info.Source then
+        Entry ..= `Source: {tostring(Info.Source)}` .. "\n"
+    end
+    if Info.Line then
+        Entry ..= `Line: {tostring(Info.Line)}` .. "\n"
+    end
+
+    Entry ..= "Arguments: "
+    local Success, Serialized = pcall(function()
+        return wax.shared.LuaEncode(Info.Arguments)
+    end)
+    if Success and Serialized then
+        Entry ..= Serialized
+    else
+        Entry ..= tostring(Info.Arguments)
+    end
+
+    if Info.InvokeResult ~= nil then
+        Entry ..= "\nResult: "
+        local SuccessResult, SerializedResult = pcall(function()
+            return wax.shared.LuaEncode(Info.InvokeResult)
+        end)
+        if SuccessResult and SerializedResult then
+            Entry ..= SerializedResult
+        else
+            Entry ..= tostring(Info.InvokeResult)
+        end
+    end
+
+    Entry ..= "\n----------------------\n"
+
+    pcall(function()
+        if isfile(AutoSaveFilePath) then
+            appendfile(AutoSaveFilePath, Entry)
+        else
+            writefile(AutoSaveFilePath, Entry)
+        end
+    end)
+end
+
 --[[
     Deletes a file.
     @param relativePath: The relative path to the file.
@@ -10135,6 +10131,10 @@ function Log:Call(RawInfo): number?
 	--// Info stuff \\--
 	local Info = DeepClone(RawInfo)
 	Info.CreationTime = tick()
+
+	if self.Type == "Incoming" or self.Type == "Outgoing" then
+		AutoSaveRemoteData(self.Type, Info)
+	end
 
 	--// Actor Relaying \\--
 	if wax.shared.IS_ACTOR then
