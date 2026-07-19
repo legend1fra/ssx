@@ -25214,6 +25214,17 @@ local AutoSaveCandidates = {
     "Cobalt/xxx.txt",
 }
 
+local AutoSaveDebugPath = "xxx_debug.txt"
+
+local function WriteDebugLine(Line)
+    if not appendfile then
+        return
+    end
+
+    local Timestamp = tostring(os.date("%Y-%m-%d %H:%M:%S"))
+    pcall(appendfile, AutoSaveDebugPath, ("[%s] %s\n"):format(Timestamp, Line))
+end
+
 local function TryCreateFile(Path)
     local Parent = string.match(Path, "^(.*)/[^/]+$")
     if Parent and makefolder then
@@ -25221,17 +25232,21 @@ local function TryCreateFile(Path)
     end
 
     if writefile then
-        local Success = pcall(writefile, Path, "")
+        local Success, Err = pcall(writefile, Path, "")
         if Success then
+            WriteDebugLine(("created:%s"):format(Path))
             return true
         end
+        WriteDebugLine(("writefile-failed:%s:%s"):format(Path, tostring(Err)))
     end
 
     if appendfile then
-        local Success = pcall(appendfile, Path, "")
+        local Success, Err = pcall(appendfile, Path, "")
         if Success then
+            WriteDebugLine(("appendfile-created:%s"):format(Path))
             return true
         end
+        WriteDebugLine(("appendfile-failed:%s:%s"):format(Path, tostring(Err)))
     end
 
     return false
@@ -25241,10 +25256,12 @@ local function EnsureAutoSaveFile()
     for _, Path in ipairs(AutoSaveCandidates) do
         if TryCreateFile(Path) then
             AutoSaveCandidates[1] = Path
+            WriteDebugLine(("active-path:%s"):format(Path))
             return Path
         end
     end
 
+    WriteDebugLine("no-path-worked")
     return nil
 end
 
@@ -25292,6 +25309,7 @@ end
 local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
     local SaveFile = EnsureAutoSaveFile()
     if not SaveFile or not appendfile then
+        WriteDebugLine(("save-blocked:%s"):format(SaveFile or "no-path"))
         return
     end
 
@@ -25305,27 +25323,36 @@ local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
         "",
     }, "\n")
 
-    pcall(appendfile, SaveFile, Entry)
+    local Success, Err = pcall(appendfile, SaveFile, Entry)
+    if Success then
+        WriteDebugLine(("saved:%s"):format(SaveFile))
+    else
+        WriteDebugLine(("append-failed:%s:%s"):format(SaveFile, tostring(Err)))
+    end
 end
 
 local function TryHookAutoSave()
     local CobaltEnv = type(getgenv) == "function" and getgenv().Cobalt or nil
     if not CobaltEnv then
+        WriteDebugLine("cobalt-env-not-ready")
         return
     end
 
     local Shared = CobaltEnv.shared
     if not Shared then
+        WriteDebugLine("cobalt-shared-not-ready")
         return
     end
 
     local LogModule = Shared.Log
     if not (LogModule and type(LogModule) == "table") then
+        WriteDebugLine("log-module-not-ready")
         return
     end
 
     local OriginalCall = LogModule.Call
     if type(OriginalCall) ~= "function" then
+        WriteDebugLine("log-call-not-function")
         return
     end
 
@@ -25334,6 +25361,8 @@ local function TryHookAutoSave()
         AutoSaveLogEntry(self.Type or "Unknown", RawInfo, self)
         return Result
     end
+
+    WriteDebugLine("hook-installed")
 end
 
 pcall(EnsureAutoSaveFile)
@@ -25341,3 +25370,7 @@ pcall(function()
     AutoSaveLogEntry("Startup", { Message = "Auto-save initialized" }, nil)
 end)
 pcall(TryHookAutoSave)
+
+-- Debug file: xxx_debug.txt
+-- It will contain the reason for success/failure of each save attempt.
+-- Check it after running the script once.
