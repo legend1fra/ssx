@@ -216,61 +216,6 @@ wax.shared.ShouldIgnore = function(Instance, Origin)
 		end
 	end
 
-		-- Auto-save IO logs periodically (non-intrusive)
-		do
-			task.spawn(function()
-				if typeof(writefile) ~= "function" then
-					return
-				end
-
-				-- wait for cobalt to initialize
-				local shared
-				for i = 1, 120 do
-					if getgenv and getgenv().Cobalt and getgenv().Cobalt.shared then
-						shared = getgenv().Cobalt.shared
-						break
-					end
-					task.wait(0.25)
-				end
-
-				if not shared then
-					return
-				end
-
-				while not shared.Unloaded do
-					pcall(function()
-						local folder = "Cobalt-Exports"
-						pcall(makefolder, folder)
-						local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
-
-						local out, inc
-						if shared.LuaEncode then
-							out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
-							inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
-						else
-							out = tostring(shared.Logs and shared.Logs.Outgoing or "")
-							inc = tostring(shared.Logs and shared.Logs.Incoming or "")
-						end
-
-						local content = table.concat({
-							"=== OUTGOING ===",
-							out,
-							"=== INCOMING ===",
-							inc,
-						}, "\n\n")
-
-						writefile(filename, content)
-
-						if shared.Sonner and shared.Sonner.success then
-							pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Auto-saved IO logs to " .. filename)
-						end
-					end)
-
-					task.wait(30)
-				end
-			end)
-		end
-
 	return wax.shared.Settings.IgnoredRemotesDropdown.Value[Instance.ClassName] == true
 		or (wax.shared.Settings.IgnorePlayerModule.Value and wax.shared.IsPlayerModule(Origin, Instance))
 end
@@ -348,93 +293,111 @@ wax.shared.Unload = function()
 	end
 	table.clear(wax.shared.Connections)
 
-	for _, ScriptRef in next, ScriptsToRun do
-		Defer(LoadScript, ScriptRef)
-	end
-
-	-- Save IO Button (non-intrusive addition)
-	do
-		local ok, Cobalt = pcall(function() return getgenv().Cobalt end)
-		if not ok or not Cobalt or not Cobalt.shared then
-			return
+	for _, Category in wax.shared.Logs do
+		for _, Log in Category do
+			Log:ClearCalls()
 		end
-
-		local shared = Cobalt.shared
-		pcall(function()
-			local player = (shared.Players and shared.Players.LocalPlayer) or nil
-			local parent = nil
-			if player and type(player) == "userdata" and player.PlayerGui then
-				parent = player.PlayerGui
-			end
-
-			parent = parent or ((shared.gethui and shared.gethui()) or shared.CoreGui)
-			if not parent then
-				return
-			end
-
-			local existing = parent:FindFirstChild("Cobalt_SaveIO_Gui")
-			local screenGui = existing or Instance.new("ScreenGui")
-			if not existing then
-				screenGui.Name = "Cobalt_SaveIO_Gui"
-				screenGui.ResetOnSpawn = false
-				screenGui.IgnoreGuiInset = true
-				screenGui.Parent = parent
-			end
-
-			local btn = screenGui:FindFirstChild("Cobalt_SaveIO_Button")
-			if not btn then
-				btn = Instance.new("TextButton")
-				btn.Name = "Cobalt_SaveIO_Button"
-				btn.Size = UDim2.new(0, 140, 0, 32)
-				btn.Position = UDim2.new(0, 10, 0, 10)
-				btn.AnchorPoint = Vector2.new(0, 0)
-				btn.Text = "Save IO Logs"
-				btn.TextSize = 14
-				btn.BackgroundTransparency = 0.2
-				btn.ZIndex = 999999
-				btn.Parent = screenGui
-			end
-
-			btn.Visible = true
-
-			btn.MouseButton1Click:Connect(function()
-				local success, err = pcall(function()
-					local folder = "Cobalt-Exports"
-					pcall(makefolder, folder)
-					local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
-
-					local out = nil
-					local inc = nil
-					if shared.LuaEncode then
-						out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
-						inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
-					else
-						out = tostring(shared.Logs and shared.Logs.Outgoing or "")
-						inc = tostring(shared.Logs and shared.Logs.Incoming or "")
-					end
-
-					local content = table.concat({
-						"=== OUTGOING ===",
-						out,
-						"=== INCOMING ===",
-						inc,
-					}, "\n\n")
-
-					writefile(filename, content)
-
-					if shared.Sonner and shared.Sonner.success then
-						pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Saved IO logs to " .. filename)
-					else
-						print("Cobalt: Saved IO logs to " .. filename)
-					end
-				end)
-
-				if not success then
-					warn("Cobalt: Failed to save IO logs - " .. tostring(err))
-				end
-			end)
-		end)
+		table.clear(Category)
 	end
+	table.clear(wax.shared.Logs)
+	table.clear(wax.shared.IncomingLogConnectionFunctions)
+
+	getgenv().CobaltInitialized = false
+	getgenv().Cobalt = nil
+
+	wax.shared.Communicator:Destroy()
+	wax.shared.ScreenGui:Destroy()
+
+	wax.shared.Unloaded = true
+end
+
+local AnticheatData = require(script.Utils.Anticheats.Main)
+
+-- Load Script
+wax.shared.Communicator = Instance.new("BindableEvent")
+
+local AutoSavePath = "Cobalt/AutoSave/traffic_log.txt"
+local function AppendAutoSaveEntry(EntryType, InstanceName, InstanceClassName, InstancePath, CallOrderInLog, SerializedEventData, GeneratedCode)
+	local timestamp = tostring(tick())
+	local entry = string.format(
+		"\n==================== %s ====================\nTime: %s\nInstance: %s\nClass: %s\nPath: %s\nCall Order: %s\nData:\n%s\nGenerated Code:\n%s\n",
+		EntryType or "Unknown",
+		timestamp,
+		InstanceName or "UnknownInstance",
+		InstanceClassName or "UnknownClass",
+		InstancePath or "UnknownPath",
+		tostring(CallOrderInLog or "N/A"),
+		SerializedEventData or "N/A",
+		GeneratedCode or "N/A"
+	)
+
+	local success, err = pcall(function()
+		if not isfolder("Cobalt") then
+			makefolder("Cobalt")
+		end
+		if not isfolder("Cobalt/AutoSave") then
+			makefolder("Cobalt/AutoSave")
+		end
+		if not isfile(AutoSavePath) then
+			writefile(AutoSavePath, "Cobalt Auto-Save Log\n")
+		end
+		appendfile(AutoSavePath, entry)
+	end)
+
+	if not success then
+		warn(("Cobalt: Failed to auto-save traffic data - %s"):format(tostring(err)))
+	end
+end
+
+wax.shared.SetupLoggingConnection = function()
+	if wax.shared.LogConnection then
+		wax.shared.LogConnection:Disconnect()
+	end
+
+	if wax.shared.LogThread then
+		pcall(task.cancel, wax.shared.LogThread)
+		wax.shared.LogThread = nil
+	end
+
+	wax.shared.LogFileName = `Cobalt/Logs/{DateTime.now():ToIsoDate():gsub(":", "_")}.log`
+	local FileLog = FileLogger.new(wax.shared.LogFileName, FileLogger.LOG_LEVELS.INFO, true)
+
+	local LogQueue = {}
+	local LogQueueHead = 1
+	local LogQueueTail = 0
+	wax.shared.LogThread = task.defer(function()
+		while not wax.shared.Unloaded do
+			while LogQueueHead <= LogQueueTail do
+				local Entry = LogQueue[LogQueueHead]
+				LogQueue[LogQueueHead] = nil
+				LogQueueHead += 1
+
+				if not Entry then
+					continue
+				end
+
+				local RemoteInstance = Entry.Instance
+				local Type = Entry.Type
+				local CallOrderInLog = Entry.CallIndex
+				local CallDataFromHook = Entry.CallData
+
+				local success, err = pcall(function()
+					local generatedCode = CodeGen:BuildCallCode(setmetatable({
+						Instance = RemoteInstance,
+						Type = Type,
+					}, {
+						__index = CallDataFromHook,
+					}) :: any)
+
+					local comprehensiveDataToSerialize = {
+						RemoteInstanceInfo = {
+							Name = RemoteInstance and RemoteInstance.Name,
+							ClassName = RemoteInstance and RemoteInstance.ClassName,
+							Path = RemoteInstance and InstanceSerializer.Serialize(RemoteInstance, {
+								DisableNilParentHandler = true,
+							}),
+						},
+						EventType = Type,
 						CallOrderInLog = CallOrderInLog,
 						DataFromHook = CallDataFromHook,
 					}
@@ -464,6 +427,16 @@ wax.shared.Unload = function()
 					}
 					local logMessage = table.concat(logParts, "\n\t")
 					local threadId = ("%s:%s"):format(Type or "S", instanceName)
+
+					AppendAutoSaveEntry(
+						Type or "Unknown",
+						instanceName,
+						instanceClassName,
+						instancePath,
+						CallOrderInLog,
+						serializedEventData,
+						generatedCode
+					)
 
 					FileLog:Info(threadId, logMessage)
 				end)
@@ -20420,8 +20393,6 @@ return function(props: {
 				end,
 			})
 		end, 14)
-
-
 	end
 
 	--// Compatibility & Safety Section \\--
@@ -25276,73 +25247,4 @@ end
 
 for _, ScriptRef in next, ScriptsToRun do
     Defer(LoadScript, ScriptRef)
-end
-
--- Save IO Button (non-intrusive addition)
-do
-	local ok, Cobalt = pcall(function() return getgenv().Cobalt end)
-	if not ok or not Cobalt or not Cobalt.shared then
-		return
-	end
-
-	local shared = Cobalt.shared
-	pcall(function()
-		local parent = (shared.gethui and shared.gethui()) or shared.CoreGui
-		if not parent then
-			return
-		end
-
-		local screenGui = Instance.new("ScreenGui")
-		screenGui.Name = "Cobalt_SaveIO_Gui"
-		screenGui.ResetOnSpawn = false
-		screenGui.Parent = parent
-
-		local btn = Instance.new("TextButton")
-		btn.Name = "Cobalt_SaveIO_Button"
-		btn.Size = UDim2.new(0, 120, 0, 30)
-		btn.Position = UDim2.new(0, 10, 0, 10)
-		btn.AnchorPoint = Vector2.new(0, 0)
-		btn.Text = "Save IO Logs"
-		btn.TextSize = 14
-		btn.BackgroundTransparency = 0.2
-		btn.ZIndex = 999999
-		btn.Parent = screenGui
-
-		btn.MouseButton1Click:Connect(function()
-			local success, err = pcall(function()
-				local folder = "Cobalt-Exports"
-				pcall(makefolder, folder)
-				local filename = folder .. "/" .. ("io_logs_%s.txt"):format(DateTime.now():ToIsoDate():gsub(":", "_"))
-
-				local out = nil
-				local inc = nil
-				if shared.LuaEncode then
-					out = shared.LuaEncode(shared.Logs and shared.Logs.Outgoing or {}, { Prettify = true })
-					inc = shared.LuaEncode(shared.Logs and shared.Logs.Incoming or {}, { Prettify = true })
-				else
-					out = tostring(shared.Logs and shared.Logs.Outgoing or "")
-					inc = tostring(shared.Logs and shared.Logs.Incoming or "")
-				end
-
-				local content = table.concat({
-					"=== OUTGOING ===",
-					out,
-					"=== INCOMING ===",
-					inc,
-				}, "\n\n")
-
-				writefile(filename, content)
-
-				if shared.Sonner and shared.Sonner.success then
-					pcall(shared.Sonner.success, shared.Sonner, "Cobalt: Saved IO logs to " .. filename)
-				else
-					print("Cobalt: Saved IO logs to " .. filename)
-				end
-			end)
-
-			if not success then
-				warn("Cobalt: Failed to save IO logs - " .. tostring(err))
-			end
-		end)
-	end)
 end
