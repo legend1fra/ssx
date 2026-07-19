@@ -25295,12 +25295,42 @@ local function SerializePayload(Value)
     end
 
     if type(Value) == "table" then
-        local Success, Encoded = pcall(function()
-            return string.format("table: %s", tostring(Value))
-        end)
-        if Success then
-            return Encoded
+        local Lines = {}
+        local Index = 0
+
+        local function AddLine(Line)
+            Index += 1
+            Lines[Index] = Line
         end
+
+        local function WalkTable(Table, Prefix)
+            if type(Table) ~= "table" then
+                return
+            end
+
+            for Key, Item in pairs(Table) do
+                local KeyText = tostring(Key)
+                local ItemText = tostring(Item)
+
+                if type(Item) == "table" then
+                    AddLine(string.format("%s.%s = {", Prefix, KeyText))
+                    WalkTable(Item, Prefix .. "." .. KeyText)
+                    AddLine(string.format("%s.%s = }", Prefix, KeyText))
+                elseif type(Item) == "string" then
+                    AddLine(string.format("%s.%s = \"%s\"", Prefix, KeyText, Item))
+                else
+                    AddLine(string.format("%s.%s = %s", Prefix, KeyText, ItemText))
+                end
+            end
+        end
+
+        pcall(function()
+            AddLine("{")
+            WalkTable(Value, "data")
+            AddLine("}")
+        end)
+
+        return table.concat(Lines, "\n")
     end
 
     local CobaltEnv = type(getgenv) == "function" and getgenv().Cobalt or nil
@@ -25328,13 +25358,18 @@ local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
     local RemoteLabel = LogObject and LogObject.Instance and tostring(LogObject.Instance) or "Unknown"
     local PayloadText = SerializePayload(RawInfo)
 
+    local KindLabel = DirectionLabel == "Incoming" and "Incoming" or (DirectionLabel == "Outgoing" and "Outgoing" or "Other")
     local Entry = table.concat({
         "==============================",
         ("Time: %s"):format(FormatTimestamp()),
         ("Direction: %s"):format(DirectionLabel),
         ("Remote: %s"):format(RemoteLabel),
-        ("Kind: %s"):format(DirectionLabel == "Incoming" and "Incoming" or (DirectionLabel == "Outgoing" and "Outgoing" or "Other")),
+        ("Kind: %s"):format(KindLabel),
         "Payload:",
+        ("- Incoming: %s"):format(KindLabel == "Incoming" and "yes" or "no"),
+        ("- Outgoing: %s"):format(KindLabel == "Outgoing" and "yes" or "no"),
+        ("- Arguments: %s"):format(type(RawInfo) == "table" and (RawInfo.Arguments ~= nil and tostring(RawInfo.Arguments) or "none") or "none"),
+        ("- Origin: %s"):format(type(RawInfo) == "table" and (RawInfo.Origin ~= nil and tostring(RawInfo.Origin) or "none") or "none"),
         PayloadText,
         "",
     }, "\n")
