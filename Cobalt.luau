@@ -317,7 +317,6 @@ local AnticheatData = require(script.Utils.Anticheats.Main)
 wax.shared.Communicator = Instance.new("BindableEvent")
 
 local AutoSavePath = "Cobalt/AutoSave/traffic_log.txt"
-EnsureAutoSaveFile()
 local function EnsureAutoSaveFile()
 	local success, err = pcall(function()
 		if not isfolder("Cobalt") then
@@ -336,6 +335,8 @@ local function EnsureAutoSaveFile()
 		warn(("Cobalt: Failed to initialize auto-save file - %s"):format(tostring(err)))
 	end
 end
+
+EnsureAutoSaveFile()
 
 local function AppendAutoSaveEntry(EntryType, InstanceName, InstanceClassName, InstancePath, CallOrderInLog, SerializedEventData, GeneratedCode)
 	local timestamp = tostring(tick())
