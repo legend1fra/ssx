@@ -6,25 +6,40 @@ local LocalPlayer = Players.LocalPlayer
 
 local NPCsFolder = workspace:WaitForChild("NPCs")
 
--- ==========================================
--- 1. نظام الحماية (Sanity) التلقائي
--- ==========================================
-local function keepSanityFull()
-    LocalPlayer:SetAttribute("Sanity", 100)
+-- Centralized heartbeat tasks to avoid multiple Heartbeat connections
+local HeartbeatTasks = {}
+local function registerHeartbeatTask(fn)
+    table.insert(HeartbeatTasks, fn)
 end
 
+RunService.Heartbeat:Connect(function(dt)
+    for _, taskFn in ipairs(HeartbeatTasks) do
+        pcall(taskFn, dt)
+    end
+end)
+
+-- ==========================================
+-- 1) Automatic Sanity (keep full)
+-- ==========================================
+local function keepSanityFull()
+    if LocalPlayer and LocalPlayer:GetAttribute("Sanity") ~= 100 then
+        LocalPlayer:SetAttribute("Sanity", 100)
+    end
+end
+
+-- Run immediately and keep it registered to events + heartbeat
 keepSanityFull()
 Library.Inject("PlayerLostSanity", keepSanityFull)
 LocalPlayer:GetAttributeChangedSignal("Sanity"):Connect(keepSanityFull)
-RunService.Heartbeat:Connect(keepSanityFull)
+registerHeartbeatTask(keepSanityFull)
+
 
 -- ==========================================
--- 2. دالة الـ ESP الأساسية (للمجسمات والنصوص)
+-- 2) Basic ESP helper (models and labels)
 -- ==========================================
 local function applyESP(model, color, topText)
-    if model:FindFirstChild("ESPHighlight") then return end
-    
-    -- إنشاء التحديد (Highlight)
+    if not model or model:FindFirstChild("ESPHighlight") then return end
+
     local highlight = Instance.new("Highlight")
     highlight.Name = "ESPHighlight"
     highlight.FillColor = color
@@ -33,54 +48,32 @@ local function applyESP(model, color, topText)
     highlight.OutlineTransparency = 0
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Parent = model
-    
-    -- إنشاء النص العائم (BillboardGui)
+
     if topText then
+        local adornee = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model
         local billboard = Instance.new("BillboardGui")
         billboard.Name = "ESPTextGui"
-        billboard.Adornee = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model
+        billboard.Adornee = adornee
         billboard.Size = UDim2.new(0, 150, 0, 30)
         billboard.StudsOffset = Vector3.new(0, 3.5, 0)
         billboard.AlwaysOnTop = true
-        
+
         local textLabel = Instance.new("TextLabel")
         textLabel.Parent = billboard
         textLabel.Size = UDim2.new(1, 0, 1, 0)
         textLabel.BackgroundTransparency = 1
         textLabel.Text = topText
         textLabel.TextColor3 = color
-        textLabel.TextStrokeTransparency = 0 -- حدود سوداء للنص ليكون مقروءاً
+        textLabel.TextStrokeTransparency = 0
         textLabel.Font = Enum.Font.SourceSansBold
         textLabel.TextSize = 16
-        
         billboard.Parent = model
     end
 end
 
--- ==========================================
--- 3. نظام ESP الخاص بالشخصيات (NPCs)
--- ==========================================
-local function checkNPC(obj)
-    if not obj:IsA("Model") then return end
-
-    local isPatient = obj:GetAttribute("IsPatient")
-    local roomName = obj:GetAttribute("DesignatedRoom")
-
-    if isPatient == true then
-        applyESP(obj, Color3.fromRGB(50, 255, 50), "🩺 " .. tostring(roomName or "Patient"))
-    else
-        applyESP(obj, Color3.fromRGB(120, 140, 255), "👤 NPC")
-    end
-end
-
-for _, obj in pairs(NPCsFolder:GetChildren()) do checkNPC(obj) end
-NPCsFolder.ChildAdded:Connect(function(obj)
-    task.wait(0.5)
-    checkNPC(obj)
-end)
 
 -- ==========================================
--- 4. نظام التحليل والعلاج التلقائي للمريض
+-- 3) NPC ESP and patient tracking
 -- ==========================================
 local trackedPatients = {}
 local inventoryOrder = {}
@@ -97,22 +90,57 @@ local function getTreatmentIcon(treatmentName)
         Injection = "💉",
         Surgery = "🛠️"
     }
-
     return icons[treatmentName] or "🧾"
+end
+
+local function findRoomByName(root, name)
+    for _, child in ipairs(root:GetChildren()) do
+        if child.Name == name then
+            return child
+        end
+        local found = findRoomByName(child, name)
+        if found then
+            return found
+        end
+    end
+    return nil
+end
+
+local function findDescendantByName(root, name)
+    for _, d in ipairs(root:GetDescendants()) do
+        if d.Name == name then return d end
+    end
+    return nil
 end
 
 local function getRoomTreatments(roomName)
     if not roomName or roomName == "" then return {} end
 
-    local roomsFolder = workspace:FindFirstChild("Rooms")
-    local medicalFolder = roomsFolder and roomsFolder:FindFirstChild("Medical")
-    local targetRoom = medicalFolder and medicalFolder:FindFirstChild(roomName)
-    local minigame = targetRoom and targetRoom:FindFirstChild("Minigame")
-    local tv = minigame and minigame:FindFirstChild("TV")
-    local screen = tv and tv:FindFirstChild("Screen")
-    local ui = screen and screen:FindFirstChild("UI")
-    local report = ui and ui:FindFirstChild("Report")
-    local inv = report and report:FindFirstChild("inv")
+    -- Try to locate the room anywhere under workspace (handles different project layouts)
+    local targetRoom = findRoomByName(workspace, roomName)
+
+    -- Fallback: try case-insensitive partial match on descendant names
+    if not targetRoom then
+        local lowerNeed = string.lower(roomName)
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d:IsA("Folder") or d:IsA("Model") then
+                if string.find(string.lower(d.Name), lowerNeed) then
+                    targetRoom = d
+                    break
+                end
+            end
+        end
+    end
+
+    if not targetRoom then return {} end
+
+    -- Look for an "inv" container anywhere under the found room
+    local inv = findDescendantByName(targetRoom, "inv")
+    if not inv then
+        -- Also try common report/ui path inside the room
+        local report = findDescendantByName(targetRoom, "Report")
+        inv = report and findDescendantByName(report, "inv") or nil
+    end
 
     if not inv then return {} end
 
@@ -122,7 +150,6 @@ local function getRoomTreatments(roomName)
             table.insert(treatments, child.Name)
         end
     end
-
     return treatments
 end
 
@@ -138,22 +165,18 @@ local function getRequiredTreatments(patientModel)
     end
 
     local roomTreatments = getRoomTreatments(roomName)
-    if #roomTreatments > 0 then
-        return roomTreatments
-    end
+    if #roomTreatments > 0 then return roomTreatments end
 
     if string.find(string.lower(roomName), "room1") then
         return {"Herbs"}
     elseif string.find(string.lower(roomName), "room2") then
         return {"Medicine"}
     end
-
     return {}
 end
 
 local function createTreatmentOverlay(patientModel, treatments)
     if patientModel:FindFirstChild("AutoTreatmentGui") then return end
-
     local rootPart = patientModel:FindFirstChild("HumanoidRootPart") or patientModel.PrimaryPart or patientModel:FindFirstChild("Head") or patientModel
     if not rootPart then return end
 
@@ -198,14 +221,12 @@ end
 local function ensureInventoryGui()
     local playerGui = LocalPlayer:WaitForChild("PlayerGui")
     local screenGui = playerGui:FindFirstChild("AutoTreatInventory")
-
     if not screenGui then
         screenGui = Instance.new("ScreenGui")
         screenGui.Name = "AutoTreatInventory"
         screenGui.ResetOnSpawn = false
         screenGui.Parent = playerGui
     end
-
     return screenGui
 end
 
@@ -220,10 +241,8 @@ end
 
 local function addInventoryItem(treatmentName)
     if inventoryItems[treatmentName] then return end
-
     local screenGui = ensureInventoryGui()
     local inventoryFrame = screenGui:FindFirstChild("InventoryFrame")
-
     if not inventoryFrame then
         inventoryFrame = Instance.new("Frame")
         inventoryFrame.Name = "InventoryFrame"
@@ -276,60 +295,87 @@ local function addInventoryItem(treatmentName)
 
     table.insert(inventoryOrder, treatmentName)
     inventoryItems[treatmentName] = itemFrame
+    -- Also give the player a usable tool for this treatment so they don't have to fetch it
+    giveTreatmentToPlayer(treatmentName)
+end
+
+local function giveTreatmentToPlayer(treatmentName)
+    if not LocalPlayer then return end
+    local backpack = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:WaitForChild("Backpack")
+    if not backpack then return end
+
+    -- Avoid duplicating tools
+    if backpack:FindFirstChild(treatmentName) or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(treatmentName)) then
+        return
+    end
+
+    local success, err = pcall(function()
+        local tool = Instance.new("Tool")
+        tool.Name = treatmentName
+        tool.RequiresHandle = true
+
+        local handle = Instance.new("Part")
+        handle.Name = "Handle"
+        handle.Size = Vector3.new(0.4, 0.4, 0.4)
+        handle.Transparency = 1
+        handle.CanCollide = false
+        handle.Parent = tool
+
+        tool.Parent = backpack
+    end)
+    if not success then
+        warn("Failed to give treatment tool:", err)
+    end
 end
 
 local function removeInventoryItem(treatmentName)
     local item = inventoryItems[treatmentName]
     if not item then return end
-
     item:Destroy()
     inventoryItems[treatmentName] = nil
-
     for index, currentName in ipairs(inventoryOrder) do
         if currentName == treatmentName then
             table.remove(inventoryOrder, index)
             break
         end
     end
-
     refreshInventoryLayout()
+    -- Remove tool from Backpack/Character when consumed
+    if LocalPlayer then
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if backpack then
+            local t = backpack:FindFirstChild(treatmentName)
+            if t then t:Destroy() end
+        end
+        if LocalPlayer.Character then
+            local ct = LocalPlayer.Character:FindFirstChild(treatmentName)
+            if ct then ct:Destroy() end
+        end
+    end
 end
 
 local function trackPatient(patientModel)
     if trackedPatients[patientModel] then return end
-
     local treatments = getRequiredTreatments(patientModel)
     local overlayLabel = createTreatmentOverlay(patientModel, treatments)
-
     if #treatments > 0 then
-        for _, treatmentName in ipairs(treatments) do
-            addInventoryItem(treatmentName)
-        end
+        for _, treatmentName in ipairs(treatments) do addInventoryItem(treatmentName) end
     else
         if overlayLabel then
             overlayLabel.Text = "Awaiting diagnosis"
             overlayLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
         end
     end
-
-    trackedPatients[patientModel] = {
-        treatments = treatments,
-        delivered = false,
-        overlayLabel = overlayLabel
-    }
+    trackedPatients[patientModel] = { treatments = treatments, delivered = false, overlayLabel = overlayLabel }
 end
 
 local function autoTreatPatient(patientModel, patientData)
     if patientData.delivered then return end
-
     local patientRoot = patientModel:FindFirstChild("HumanoidRootPart") or patientModel.PrimaryPart or patientModel:FindFirstChild("Head")
     local characterRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
     if not patientRoot or not characterRoot then return end
-
     local distance = (patientRoot.Position - characterRoot.Position).Magnitude
     if distance > 12 then return end
-
     for _, treatmentName in ipairs(patientData.treatments) do
         if inventoryItems[treatmentName] then
             removeInventoryItem(treatmentName)
@@ -343,7 +389,8 @@ local function autoTreatPatient(patientModel, patientData)
     end
 end
 
-RunService.Heartbeat:Connect(function()
+-- Register patient auto-treat logic on heartbeat
+registerHeartbeatTask(function()
     for patientModel, patientData in pairs(trackedPatients) do
         if patientModel and patientModel.Parent then
             autoTreatPatient(patientModel, patientData)
@@ -351,47 +398,49 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-local function handlePatientModel(obj)
-    if not obj:IsA("Model") then return end
+local function isPatientModel(obj)
+    if not obj or not obj:IsA("Model") then return false end
 
-    local isPatient = obj:GetAttribute("IsPatient")
-    if isPatient == true then
-        trackPatient(obj)
+    local value = obj:GetAttribute("IsPatient")
+    if value == true then
+        return true
     end
+
+    if type(value) == "string" then
+        local normalized = string.lower(value)
+        return normalized == "true" or normalized == "1" or normalized == "yes"
+    end
+
+    return false
 end
 
-for _, obj in pairs(NPCsFolder:GetChildren()) do
-    handlePatientModel(obj)
+local function handlePatientModel(obj)
+    if not isPatientModel(obj) then return end
+
+    applyESP(obj, Color3.fromRGB(0, 200, 120), "🧑‍⚕️ Patient")
+    trackPatient(obj)
 end
 
+for _, obj in pairs(NPCsFolder:GetChildren()) do handlePatientModel(obj) end
 NPCsFolder.ChildAdded:Connect(function(obj)
     task.wait(0.5)
     handlePatientModel(obj)
 end)
 
+
 -- ==========================================
--- 5. نظام ESP الخاص باللاعبين (Players)
+-- 4) Players ESP
 -- ==========================================
 local function handlePlayer(player)
-    -- تجاهل اللاعب المحلي (أنت) حتى لا تتحدد شخصيتك
     if player == LocalPlayer then return end
-
-    -- إذا كانت شخصية اللاعب موجودة بالفعل
     if player.Character then
-        applyESP(player.Character, Color3.fromRGB(50, 150, 255), "👤 " .. player.Name) -- أزرق
+        applyESP(player.Character, Color3.fromRGB(50, 150, 255), "👤 " .. player.Name)
     end
-
-    -- عندما يموت اللاعب ويترسبن من جديد
     player.CharacterAdded:Connect(function(character)
-        task.wait(0.5) -- انتظار قصير حتى يكتمل تحميل مجسم اللاعب
+        task.wait(0.5)
         applyESP(character, Color3.fromRGB(50, 150, 255), "👤 " .. player.Name)
     end)
 end
 
--- تطبيق الـ ESP على اللاعبين الموجودين حالياً في السيرفر
-for _, player in pairs(Players:GetPlayers()) do
-    handlePlayer(player)
-end
-
--- تطبيق الـ ESP على أي لاعب جديد يدخل السيرفر لاحقاً
+for _, player in pairs(Players:GetPlayers()) do handlePlayer(player) end
 Players.PlayerAdded:Connect(handlePlayer)
