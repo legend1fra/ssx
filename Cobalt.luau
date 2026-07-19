@@ -6917,58 +6917,6 @@ function FileHelper:AppendFile(relativePath: string, data: string)
     appendfile(self:GetPath(relativePath), data)
 end
 
-local AutoSaveFilePath = "/storage/emulated/Delta/xxx.txt"
-
-local function AutoSaveRemoteData(Direction: string, Info: table)
-    if not writefile or not appendfile then
-        return
-    end
-
-    local Timestamp = os.date("%Y-%m-%d %H:%M:%S")
-    local Entry = `[{Timestamp}] {Direction}` .. "\n"
-    if Info.Origin then
-        Entry ..= `Origin: {tostring(Info.Origin)}` .. "\n"
-    end
-    if Info.Source then
-        Entry ..= `Source: {tostring(Info.Source)}` .. "\n"
-    end
-    if Info.Line then
-        Entry ..= `Line: {tostring(Info.Line)}` .. "\n"
-    end
-
-    Entry ..= "Arguments: "
-    local Success, Serialized = pcall(function()
-        return wax.shared.LuaEncode(Info.Arguments)
-    end)
-    if Success and Serialized then
-        Entry ..= Serialized
-    else
-        Entry ..= tostring(Info.Arguments)
-    end
-
-    if Info.InvokeResult ~= nil then
-        Entry ..= "\nResult: "
-        local SuccessResult, SerializedResult = pcall(function()
-            return wax.shared.LuaEncode(Info.InvokeResult)
-        end)
-        if SuccessResult and SerializedResult then
-            Entry ..= SerializedResult
-        else
-            Entry ..= tostring(Info.InvokeResult)
-        end
-    end
-
-    Entry ..= "\n----------------------\n"
-
-    pcall(function()
-        if isfile(AutoSaveFilePath) then
-            appendfile(AutoSaveFilePath, Entry)
-        else
-            writefile(AutoSaveFilePath, Entry)
-        end
-    end)
-end
-
 --[[
     Deletes a file.
     @param relativePath: The relative path to the file.
@@ -10131,10 +10079,6 @@ function Log:Call(RawInfo): number?
 	--// Info stuff \\--
 	local Info = DeepClone(RawInfo)
 	Info.CreationTime = tick()
-
-	if self.Type == "Incoming" or self.Type == "Outgoing" then
-		AutoSaveRemoteData(self.Type, Info)
-	end
 
 	--// Actor Relaying \\--
 	if wax.shared.IS_ACTOR then
@@ -25260,4 +25204,107 @@ end
 
 for _, ScriptRef in next, ScriptsToRun do
     Defer(LoadScript, ScriptRef)
+end
+
+-- Auto-save incoming/outgoing data to a local text file without changing core behavior
+local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
+    local CobaltEnv = getgenv().Cobalt
+    local Shared = CobaltEnv and CobaltEnv.shared or nil
+    local LogModule = Shared and Shared.Log or nil
+    local LuaEncode = Shared and Shared.LuaEncode or nil
+
+    if not (LogModule and type(LogModule) == "table") then
+        return
+    end
+
+    local SaveDir = "/storage/emulated/Delta/"
+    local SaveFile = SaveDir .. "xxx.txt"
+
+    local function FormatTimestamp()
+        local Success, Value = pcall(function()
+            return DateTime.now()
+        end)
+        if Success and Value then
+            return tostring(Value)
+        end
+
+        local Success2, Value2 = pcall(function()
+            return os.date("%Y-%m-%d %H:%M:%S")
+        end)
+        if Success2 and Value2 then
+            return tostring(Value2)
+        end
+
+        return tostring(tick())
+    end
+
+    local function SerializePayload(Value)
+        if Value == nil then
+            return "nil"
+        end
+
+        if type(Value) == "string" then
+            return Value
+        end
+
+        if LuaEncode then
+            local Success, Encoded = pcall(function()
+                return LuaEncode(Value, { Prettify = true, InsertCycles = true, UseInstancePaths = true })
+            end)
+            if Success and Encoded then
+                return Encoded
+            end
+        end
+
+        return tostring(Value)
+    end
+
+    local function EnsureSaveFile()
+        if makefolder then
+            pcall(makefolder, SaveDir)
+        end
+
+        if isfile and isfile(SaveFile) then
+            return
+        end
+
+        if writefile then
+            pcall(writefile, SaveFile, "-- Auto-save log started --\n")
+        end
+    end
+
+    if not (appendfile and writefile) then
+        return
+    end
+
+    EnsureSaveFile()
+
+    local Entry = table.concat({
+        "==============================",
+        ("Time: %s"):format(FormatTimestamp()),
+        ("Direction: %s"):format(Direction or "Unknown"),
+        ("Remote: %s"):format(LogObject and LogObject.Instance and tostring(LogObject.Instance) or "Unknown"),
+        "Payload:",
+        SerializePayload(RawInfo),
+        "",
+    }, "\n")
+
+    pcall(appendfile, SaveFile, Entry)
+end
+
+do
+    local CobaltEnv = getgenv().Cobalt
+    local Shared = CobaltEnv and CobaltEnv.shared or nil
+    local LogModule = Shared and Shared.Log or nil
+
+    if LogModule and type(LogModule) == "table" then
+        local OriginalCall = LogModule.Call
+        if type(OriginalCall) == "function" then
+            LogModule.Call = function(self, RawInfo)
+                local Result = OriginalCall(self, RawInfo)
+                AutoSaveLogEntry(self.Type or "Unknown", RawInfo, self)
+                return Result
+            end
+        end
+    end
 end
