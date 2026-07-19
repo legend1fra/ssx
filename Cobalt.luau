@@ -25207,77 +25207,87 @@ for _, ScriptRef in next, ScriptsToRun do
 end
 
 -- Auto-save incoming/outgoing data to a local text file without changing core behavior
-local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
-    local CobaltEnv = getgenv().Cobalt
-    local Shared = CobaltEnv and CobaltEnv.shared or nil
-    local LogModule = Shared and Shared.Log or nil
-    local LuaEncode = Shared and Shared.LuaEncode or nil
+local AutoSaveDir = "/storage/emulated/Delta/"
+local AutoSaveCandidates = {
+    AutoSaveDir .. "xxx.txt",
+    "xxx.txt",
+}
 
-    if not (LogModule and type(LogModule) == "table") then
-        return
+local function CreateAutoSaveFile(Path)
+    if makefolder then
+        pcall(makefolder, AutoSaveDir)
     end
 
-    local SaveDir = "/storage/emulated/Delta/"
-    local SaveFile = SaveDir .. "xxx.txt"
-
-    local function FormatTimestamp()
-        local Success, Value = pcall(function()
-            return DateTime.now()
-        end)
-        if Success and Value then
-            return tostring(Value)
-        end
-
-        local Success2, Value2 = pcall(function()
-            return os.date("%Y-%m-%d %H:%M:%S")
-        end)
-        if Success2 and Value2 then
-            return tostring(Value2)
-        end
-
-        return tostring(tick())
+    if writefile then
+        pcall(writefile, Path, "")
+        return true
     end
 
-    local function SerializePayload(Value)
-        if Value == nil then
-            return "nil"
-        end
+    if appendfile then
+        pcall(appendfile, Path, "")
+        return true
+    end
 
-        if type(Value) == "string" then
-            return Value
-        end
+    return false
+end
 
-        if LuaEncode then
-            local Success, Encoded = pcall(function()
-                return LuaEncode(Value, { Prettify = true, InsertCycles = true, UseInstancePaths = true })
-            end)
-            if Success and Encoded then
-                return Encoded
-            end
+local function EnsureAutoSaveFile()
+    for _, Path in ipairs(AutoSaveCandidates) do
+        if CreateAutoSaveFile(Path) then
+            AutoSaveCandidates[1] = Path
+            return Path
         end
+    end
 
+    return nil
+end
+
+local function FormatTimestamp()
+    local Success, Value = pcall(function()
+        return DateTime.now()
+    end)
+    if Success and Value then
         return tostring(Value)
     end
 
-    local function EnsureSaveFile()
-        if makefolder then
-            pcall(makefolder, SaveDir)
-        end
+    local Success2, Value2 = pcall(function()
+        return os.date("%Y-%m-%d %H:%M:%S")
+    end)
+    if Success2 and Value2 then
+        return tostring(Value2)
+    end
 
-        if isfile and isfile(SaveFile) then
-            return
-        end
+    return tostring(tick())
+end
 
-        if writefile then
-            pcall(writefile, SaveFile, "-- Auto-save log started --\n")
+local function SerializePayload(Value)
+    if Value == nil then
+        return "nil"
+    end
+
+    if type(Value) == "string" then
+        return Value
+    end
+
+    local CobaltEnv = type(getgenv) == "function" and getgenv().Cobalt or nil
+    local LuaEncode = CobaltEnv and CobaltEnv.shared and CobaltEnv.shared.LuaEncode or nil
+    if LuaEncode then
+        local Success, Encoded = pcall(function()
+            return LuaEncode(Value, { Prettify = true, InsertCycles = true, UseInstancePaths = true })
+        end)
+        if Success and Encoded then
+            return Encoded
         end
     end
 
-    if not (appendfile and writefile) then
+    return tostring(Value)
+end
+
+local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
+    local SaveFile = EnsureAutoSaveFile()
+    if not SaveFile or not appendfile then
         return
     end
-
-    EnsureSaveFile()
 
     local Entry = table.concat({
         "==============================",
@@ -25292,19 +25302,36 @@ local function AutoSaveLogEntry(Direction, RawInfo, LogObject)
     pcall(appendfile, SaveFile, Entry)
 end
 
-do
-    local CobaltEnv = getgenv().Cobalt
-    local Shared = CobaltEnv and CobaltEnv.shared or nil
-    local LogModule = Shared and Shared.Log or nil
+local function TryHookAutoSave()
+    local CobaltEnv = type(getgenv) == "function" and getgenv().Cobalt or nil
+    if not CobaltEnv then
+        return
+    end
 
-    if LogModule and type(LogModule) == "table" then
-        local OriginalCall = LogModule.Call
-        if type(OriginalCall) == "function" then
-            LogModule.Call = function(self, RawInfo)
-                local Result = OriginalCall(self, RawInfo)
-                AutoSaveLogEntry(self.Type or "Unknown", RawInfo, self)
-                return Result
-            end
-        end
+    local Shared = CobaltEnv.shared
+    if not Shared then
+        return
+    end
+
+    local LogModule = Shared.Log
+    if not (LogModule and type(LogModule) == "table") then
+        return
+    end
+
+    local OriginalCall = LogModule.Call
+    if type(OriginalCall) ~= "function" then
+        return
+    end
+
+    LogModule.Call = function(self, RawInfo)
+        local Result = OriginalCall(self, RawInfo)
+        AutoSaveLogEntry(self.Type or "Unknown", RawInfo, self)
+        return Result
     end
 end
+
+pcall(EnsureAutoSaveFile)
+pcall(function()
+    AutoSaveLogEntry("Startup", { Message = "Auto-save initialized" }, nil)
+end)
+pcall(TryHookAutoSave)
